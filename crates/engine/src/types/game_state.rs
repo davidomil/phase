@@ -2836,6 +2836,11 @@ pub struct GameState {
     pub players_who_discarded_card_this_turn: HashSet<PlayerId>,
     #[serde(default)]
     pub players_who_sacrificed_artifact_this_turn: HashSet<PlayerId>,
+    /// CR 701.21a: Sacrificed permanent snapshots this turn, preserving
+    /// event-time characteristics for filtered "you sacrificed [quality] this
+    /// turn" conditions and quantities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sacrificed_permanents_this_turn: Vec<ZoneChangeRecord>,
     /// CR 400.7: Zone-change snapshots this turn, enabling data-driven condition queries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zone_changes_this_turn: Vec<ZoneChangeRecord>,
@@ -3286,6 +3291,7 @@ impl GameState {
             counter_added_this_turn: Vec::new(),
             players_who_discarded_card_this_turn: HashSet::new(),
             players_who_sacrificed_artifact_this_turn: HashSet::new(),
+            sacrificed_permanents_this_turn: Vec::new(),
             zone_changes_this_turn: Vec::new(),
             battlefield_entries_this_turn: Vec::new(),
             damage_dealt_this_turn: Vec::new(),
@@ -3499,6 +3505,7 @@ impl PartialEq for GameState {
                 == other.players_who_discarded_card_this_turn
             && self.players_who_sacrificed_artifact_this_turn
                 == other.players_who_sacrificed_artifact_this_turn
+            && self.sacrificed_permanents_this_turn == other.sacrificed_permanents_this_turn
             && self.zone_changes_this_turn == other.zone_changes_this_turn
             && self.battlefield_entries_this_turn == other.battlefield_entries_this_turn
             && self.damage_dealt_this_turn == other.damage_dealt_this_turn

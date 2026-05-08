@@ -1233,6 +1233,7 @@ fn parse_youve_this_turn(input: &str) -> OracleResult<'_, StaticCondition> {
         parse_cast_spell_count_this_turn,
         |input| parse_another_spell_cast_this_turn(input, 2),
         parse_cast_one_spell_this_turn,
+        parse_sacrificed_this_turn_after_actor,
         value(
             make_quantity_ge(QuantityRef::CrimesCommittedThisTurn, 1),
             tag("committed a crime this turn"),
@@ -1399,6 +1400,7 @@ fn parse_event_state_conditions(input: &str) -> OracleResult<'_, StaticCondition
         // "no creatures are on the battlefield"
         parse_no_on_battlefield,
     ))
+    .or(parse_you_sacrificed_this_turn)
     .parse(input)
 }
 
@@ -1864,6 +1866,57 @@ fn parse_one_spell_this_turn_after_cast(input: &str) -> OracleResult<'_, StaticC
             QuantityRef::SpellsCastThisTurn {
                 scope: CountScope::Controller,
                 filter: Some(filter),
+            },
+            1,
+        ),
+    ))
+}
+
+fn parse_you_sacrificed_this_turn(input: &str) -> OracleResult<'_, StaticCondition> {
+    let (rest, _) = tag("you ").parse(input)?;
+    parse_sacrificed_this_turn_after_actor(rest)
+}
+
+fn parse_sacrificed_this_turn_after_actor(input: &str) -> OracleResult<'_, StaticCondition> {
+    let (rest, _) = tag("sacrificed ").parse(input)?;
+    parse_sacrificed_this_turn_tail(rest)
+}
+
+fn parse_sacrificed_this_turn_tail(input: &str) -> OracleResult<'_, StaticCondition> {
+    if let Ok((rest, n)) = parse_ge_threshold(input) {
+        let (rest, type_text) = take_until(" this turn").parse(rest)?;
+        let (rest, _) = tag(" this turn").parse(rest)?;
+        let (filter, leftover) = parse_type_phrase(type_text.trim());
+        if leftover.trim().is_empty() && filter != TargetFilter::Any {
+            return Ok((
+                rest,
+                make_quantity_ge(
+                    QuantityRef::SacrificedThisTurn {
+                        player: PlayerScope::Controller,
+                        filter,
+                    },
+                    n,
+                ),
+            ));
+        }
+    }
+
+    let (rest, _) = parse_article(input)?;
+    let (rest, type_text) = take_until(" this turn").parse(rest)?;
+    let (rest, _) = tag(" this turn").parse(rest)?;
+    let (filter, leftover) = parse_type_phrase(type_text.trim());
+    if !leftover.trim().is_empty() || filter == TargetFilter::Any {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Fail,
+        )));
+    }
+    Ok((
+        rest,
+        make_quantity_ge(
+            QuantityRef::SacrificedThisTurn {
+                player: PlayerScope::Controller,
+                filter,
             },
             1,
         ),
@@ -4408,6 +4461,71 @@ mod tests {
                 rhs: QuantityExpr::Fixed { value: 0 },
             }
         );
+    }
+
+    #[test]
+    fn sacrificed_artifact_this_turn_counts_controller_sacrifices() {
+        let (rest, c) =
+            parse_condition("as long as you've sacrificed an artifact this turn").unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::SacrificedThisTurn {
+                                player: PlayerScope::Controller,
+                                filter: TargetFilter::Typed(TypedFilter { type_filters, .. }),
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 1 },
+            } => assert_eq!(type_filters, vec![TypeFilter::Artifact]),
+            other => panic!("expected artifact SacrificedThisTurn GE 1, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sacrificed_permanent_this_turn_counts_controller_sacrifices() {
+        let (rest, c) = parse_inner_condition("you sacrificed a permanent this turn").unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::SacrificedThisTurn {
+                                player: PlayerScope::Controller,
+                                filter: TargetFilter::Typed(TypedFilter { type_filters, .. }),
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 1 },
+            } => assert_eq!(type_filters, vec![TypeFilter::Permanent]),
+            other => panic!("expected permanent SacrificedThisTurn GE 1, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sacrificed_clue_threshold_this_turn_counts_controller_sacrifices() {
+        let (rest, c) =
+            parse_inner_condition("you sacrificed three or more clues this turn").unwrap();
+        assert_eq!(rest, "");
+        match c {
+            StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty:
+                            QuantityRef::SacrificedThisTurn {
+                                player: PlayerScope::Controller,
+                                filter: TargetFilter::Typed(TypedFilter { type_filters, .. }),
+                            },
+                    },
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 3 },
+            } => assert!(type_filters.contains(&TypeFilter::Subtype("Clue".to_string()))),
+            other => panic!("expected Clue SacrificedThisTurn GE 3, got {other:?}"),
+        }
     }
 
     #[test]

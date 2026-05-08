@@ -240,6 +240,7 @@ pub fn start_next_turn(state: &mut GameState, events: &mut Vec<GameEvent>) {
     state.counter_added_this_turn.clear();
     state.players_who_discarded_card_this_turn.clear();
     state.players_who_sacrificed_artifact_this_turn.clear();
+    state.sacrificed_permanents_this_turn.clear();
     state.zone_changes_this_turn.clear();
     state.battlefield_entries_this_turn.clear();
     state.damage_dealt_this_turn.clear();

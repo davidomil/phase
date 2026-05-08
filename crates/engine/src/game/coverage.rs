@@ -863,6 +863,13 @@ fn fmt_quantity_ref(qty: &QuantityRef) -> String {
         QuantityRef::EnteredThisTurn { filter } => {
             format!("{} entered this turn", fmt_target(filter))
         }
+        QuantityRef::SacrificedThisTurn { player, filter } => {
+            format!(
+                "{} sacrificed this turn ({})",
+                fmt_target(filter),
+                fmt_player_scope(*player)
+            )
+        }
         QuantityRef::CrimesCommittedThisTurn => "crimes committed this turn".into(),
         QuantityRef::LifeGainedThisTurn { player } => {
             format!("life gained this turn ({})", fmt_player_scope(*player))
@@ -4611,6 +4618,7 @@ fn quantity_ref_feature(qref: &QuantityRef) -> (&'static str, FeatureSupport) {
         QuantityRef::EventContextSourceManaValue => ("EventContextSourceManaValue", Handled),
         QuantityRef::SpellsCastThisTurn { .. } => ("SpellsCastThisTurn", Handled),
         QuantityRef::EnteredThisTurn { .. } => ("EnteredThisTurn", Handled),
+        QuantityRef::SacrificedThisTurn { .. } => ("SacrificedThisTurn", Handled),
         QuantityRef::CrimesCommittedThisTurn => ("CrimesCommittedThisTurn", Handled),
         QuantityRef::LifeGainedThisTurn { .. } => ("LifeGainedThisTurn", Handled),
         QuantityRef::CardsDrawnThisTurn { .. } => ("CardsDrawnThisTurn", Handled),

@@ -2269,6 +2269,15 @@ pub enum QuantityRef {
     /// Count of permanents matching filter that entered the battlefield
     /// under the controller's control this turn.
     EnteredThisTurn { filter: TargetFilter },
+    /// CR 701.21a: Count permanents sacrificed this turn by players in
+    /// `player`, filtered against the permanent's sacrifice-time
+    /// characteristics. Covers threshold and dynamic-count phrases like
+    /// "you sacrificed a permanent this turn", "you've sacrificed an artifact
+    /// this turn", and "the number of Foods you've sacrificed this turn".
+    SacrificedThisTurn {
+        player: PlayerScope,
+        filter: TargetFilter,
+    },
     /// CR 710.2: Number of crimes the controller has committed this turn.
     CrimesCommittedThisTurn,
     /// CR 119.4: Amount of life gained this turn, scoped by `player` per the

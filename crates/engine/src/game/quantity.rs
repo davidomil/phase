@@ -1235,6 +1235,25 @@ fn resolve_ref(
                 })
                 .count(),
         ),
+        QuantityRef::SacrificedThisTurn { player, ref filter } => {
+            resolve_per_player_scalar(state, *player, controller, ctx, targets, |scoped_player| {
+                usize_to_i32_saturating(
+                    state
+                        .sacrificed_permanents_this_turn
+                        .iter()
+                        .filter(|record| {
+                            record.controller == scoped_player.id
+                                && matches_target_filter_on_zone_change_record(
+                                    state,
+                                    record,
+                                    filter,
+                                    &filter_ctx,
+                                )
+                        })
+                        .count(),
+                )
+            })
+        }
         // CR 710.2: Crimes committed this turn — uses tracked counter on player.
         QuantityRef::CrimesCommittedThisTurn => {
             player.map_or(0, |p| u32_to_i32_saturating(p.crimes_committed_this_turn))
@@ -2085,6 +2104,64 @@ mod tests {
         };
 
         assert_eq!(resolve_quantity(&state, &qty, PlayerId(0), ObjectId(1)), 3);
+    }
+
+    #[test]
+    fn resolve_sacrificed_this_turn_counts_matching_controller_records() {
+        let mut state = GameState::new_two_player(42);
+        let artifact = create_object(
+            &mut state,
+            CardId(100),
+            PlayerId(0),
+            "Clue".to_string(),
+            Zone::Battlefield,
+        );
+        state
+            .objects
+            .get_mut(&artifact)
+            .unwrap()
+            .card_types
+            .core_types
+            .push(CoreType::Artifact);
+        let creature = create_object(
+            &mut state,
+            CardId(101),
+            PlayerId(1),
+            "Bear".to_string(),
+            Zone::Battlefield,
+        );
+        state
+            .objects
+            .get_mut(&creature)
+            .unwrap()
+            .card_types
+            .core_types
+            .push(CoreType::Creature);
+
+        state.sacrificed_permanents_this_turn.push(
+            state.objects[&artifact].snapshot_for_zone_change(
+                artifact,
+                Some(Zone::Battlefield),
+                Zone::Graveyard,
+            ),
+        );
+        state.sacrificed_permanents_this_turn.push(
+            state.objects[&creature].snapshot_for_zone_change(
+                creature,
+                Some(Zone::Battlefield),
+                Zone::Graveyard,
+            ),
+        );
+
+        let qty = QuantityExpr::Ref {
+            qty: QuantityRef::SacrificedThisTurn {
+                player: PlayerScope::Controller,
+                filter: TargetFilter::Typed(TypedFilter::new(TypeFilter::Artifact)),
+            },
+        };
+
+        assert_eq!(resolve_quantity(&state, &qty, PlayerId(0), artifact), 1);
+        assert_eq!(resolve_quantity(&state, &qty, PlayerId(1), creature), 0);
     }
 
     #[test]

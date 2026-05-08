@@ -21,7 +21,7 @@ pub(crate) enum SacrificeOutcome {
     NeedsReplacementChoice(PlayerId),
 }
 
-/// CR 701.17 + CR 118.3: Sacrifice a permanent — move to graveyard as a cost or effect.
+/// CR 701.21 + CR 118.3: Sacrifice a permanent — move to graveyard as a cost or effect.
 /// Routes through replacement pipeline (e.g., Rest in Peace → exile).
 ///
 /// Returns `SacrificeOutcome` so callers can handle the `NeedsChoice` case appropriately:
@@ -90,9 +90,9 @@ pub(crate) fn apply_sacrifice_after_replacement(
             player_id: pid,
             ..
         } => {
+            restrictions::record_sacrifice(state, oid, pid);
             zones::move_to_zone(state, oid, Zone::Graveyard, events);
             state.layers_dirty = true;
-            restrictions::record_sacrifice(state, oid, pid);
             events.push(GameEvent::PermanentSacrificed {
                 object_id: oid,
                 player_id: pid,
@@ -183,6 +183,11 @@ mod tests {
         assert!(state
             .players_who_sacrificed_artifact_this_turn
             .contains(&PlayerId(0)));
+        assert_eq!(state.sacrificed_permanents_this_turn.len(), 1);
+        let record = &state.sacrificed_permanents_this_turn[0];
+        assert_eq!(record.object_id, obj_id);
+        assert_eq!(record.controller, PlayerId(0));
+        assert!(record.core_types.contains(&CoreType::Artifact));
     }
 
     #[test]
