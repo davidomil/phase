@@ -291,6 +291,17 @@ pub fn parse_target_with_ctx<'a>(text: &'a str, ctx: &mut ParseContext) -> (Targ
             return (TargetFilter::ParentTarget, rem);
         }
     }
+    // "the first [type phrase]" → anaphoric reference to an object identified
+    // by the triggering event. Lifeline-style delayed triggers snapshot this
+    // parent target while the event context is still available.
+    if let Ok((rest_subject, _)) = tag::<_, _, OracleError<'_>>("the first ").parse(lower.as_str())
+    {
+        let original_rest = &text[lower.len() - rest_subject.len()..];
+        let (filter, rem) = parse_type_phrase_with_ctx(original_rest, ctx);
+        if !matches!(filter, TargetFilter::Any) {
+            return (TargetFilter::ParentTarget, rem);
+        }
+    }
 
     // "~" — self-reference (normalized from card name)
     if let Ok((rest, _)) = tag::<_, _, OracleError<'_>>("~").parse(lower.as_str()) {
@@ -4026,6 +4037,13 @@ mod tests {
         let (f, rest) = parse_target("one into your hand");
         assert_eq!(f, TargetFilter::ParentTarget);
         assert_eq!(rest, " into your hand");
+    }
+
+    #[test]
+    fn the_first_typed_object_inherits_parent_target() {
+        let (f, rest) = parse_target("the first card to the battlefield");
+        assert_eq!(f, TargetFilter::ParentTarget);
+        assert_eq!(rest, " to the battlefield");
     }
 
     #[test]
