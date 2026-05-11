@@ -3676,6 +3676,81 @@ fn try_parse_per_grantee_play_grant(tp: TextPair<'_>) -> Option<ParsedEffectClau
     }))
 }
 
+/// CR 400.7i + CR 609.4b: Persistent duration-scoped cast permission for the
+/// "exile, then until [duration] you may cast spells from among those exiled
+/// cards" anaphor (Nassari Dean of Expression, Stolen Strategy, and similar
+/// cast-from-tracked-exile patterns).
+///
+/// Distinguishes from the single-resolution sibling
+/// [`Effect::CastFromZone { target: ExiledBySource }`] (Etali, Apex of Power,
+/// Improvisation Capstone) by the presence of a duration scope on the cast
+/// permission rather than an inline cast. The persistent variant grants
+/// [`CastingPermission::PlayFromExile`] to the tracked-set members and lets
+/// the controller cast across the duration window; the single-resolution
+/// variant casts inline during the same resolution.
+///
+/// The grant binds to [`TargetFilter::TrackedSet { id: TrackedSetId(0) }`] —
+/// `grant_permission::resolve` normalizes the sentinel to the most recently
+/// published tracked set, and only objects in that set receive the
+/// permission. Cards exiled by other sources do not have this permission
+/// attached and are correctly excluded from `has_exile_cast_permission`'s
+/// surfacing. No new variant needed — the existing primitives compose.
+///
+/// The optional ", and you may spend mana as though it were mana of any
+/// color to cast those spells" conjunct folds into the same permission via
+/// `mana_spend_permission: Some(ManaSpendPermission::AnyTypeOrColor)`,
+/// matching the wire-up used by `try_parse_exile_play_grant_with_any_mana`.
+fn try_parse_cast_from_tracked_exile_grant(tp: TextPair<'_>) -> Option<ParsedEffectClause> {
+    // Prefix: "you may cast spells from among [those|the] exiled cards"
+    let ((), rest_orig) = nom_on_lower(tp.original, tp.lower, |i| {
+        let (i, _) = tag("you may cast spells from among ").parse(i)?;
+        let (i, _) = alt((tag("those exiled cards"), tag("the exiled cards"))).parse(i)?;
+        Ok((i, ()))
+    })?;
+    let rest_lower = &tp.lower[tp.lower.len() - rest_orig.len()..];
+
+    // Optional any-color mana conjunct: ", and you may spend mana as though
+    // it were mana of any color to cast those spells" (or "...any type...").
+    let mana_spend_permission = if rest_lower.is_empty() {
+        None
+    } else {
+        // Trailing text that is not the recognized conjunct — reject so the
+        // catch-all SpendManaAsAnyColor parse does not consume an unrelated
+        // suffix and silently drop the cast-permission half.
+        nom_on_lower(rest_orig, rest_lower, |i| {
+            let (i, _) = tag(", and you may spend mana as though it were mana of any ").parse(i)?;
+            let (i, _) = alt((tag("color"), tag("type"))).parse(i)?;
+            let (i, _) = tag(" to cast those spells").parse(i)?;
+            let (i, _) = eof.parse(i)?;
+            Ok((i, ()))
+        })?;
+        Some(ManaSpendPermission::AnyTypeOrColor)
+    };
+
+    Some(parsed_clause(Effect::GrantCastingPermission {
+        permission: CastingPermission::PlayFromExile {
+            // Duration is a placeholder; `with_clause_duration` patches this
+            // when a leading "Until end of turn, " or trailing "... this turn"
+            // is stripped. CR 611.2a + CR 514.2: the duration governs prune
+            // timing in `layers.rs::prune_play_from_exile_at_cleanup`.
+            duration: Duration::Permanent,
+            // CR 611.2a/b: placeholder — `grant_permission::resolve` rewrites
+            // this to the concrete grantee at grant time.
+            granted_to: crate::types::player::PlayerId(0),
+            mana_spend_permission,
+        },
+        // CR 603.7 + CR 608.2c: TrackedSet sentinel — the runtime resolver
+        // normalizes `TrackedSetId(0)` to the most recently published set
+        // (the cards exiled by the parent effect in this resolution chain).
+        // Only those objects receive the permission; cards exiled by other
+        // sources do not, scoping the cast surface to the correct exile set.
+        target: TargetFilter::TrackedSet {
+            id: TrackedSetId(0),
+        },
+        grantee: Default::default(),
+    }))
+}
+
 fn try_parse_exile_play_grant_with_any_mana(tp: TextPair<'_>) -> Option<ParsedEffectClause> {
     let (rest, _) = alt((
         tag::<_, _, OracleError<'_>>("you may look at and play "),
@@ -3738,6 +3813,15 @@ fn try_parse_play_from_exile(tp: TextPair) -> Option<ParsedEffectClause> {
         return Some(clause);
     }
     if let Some(clause) = try_parse_exile_play_grant_with_any_mana(tp) {
+        return Some(clause);
+    }
+    // CR 400.7i + CR 609.4b: Persistent duration-scoped variant —
+    // "you may cast spells from among those exiled cards[, and you may spend
+    // mana as though it were mana of any color to cast those spells]".
+    // Must run before the catch-all SpendManaAsAnyColor branch so the
+    // GrantCastingPermission half is not silently dropped (Nassari, Stolen
+    // Strategy, and similar exile-then-cast-permission patterns).
+    if let Some(clause) = try_parse_cast_from_tracked_exile_grant(tp) {
         return Some(clause);
     }
 
@@ -26786,6 +26870,151 @@ mod tests {
         let e = parse_effect("cast spells from among those exiled cards");
         let Effect::CastFromZone { target, .. } = e else {
             panic!("expected CastFromZone, got {:?}", e);
+        };
+        assert_eq!(target, TargetFilter::ExiledBySource);
+    }
+
+    /// CR 400.7i + CR 609.4b + CR 611.2a: Persistent duration-scoped
+    /// "Until end of turn, you may cast spells from among those exiled cards"
+    /// (Dream Pillager surface form — no any-color mana conjunct). Distinct
+    /// from the single-resolution `Effect::CastFromZone { ExiledBySource }`
+    /// sibling: emits a `GrantCastingPermission { PlayFromExile }` bound to
+    /// `TargetFilter::TrackedSet` so only the cards just exiled by the
+    /// parent effect receive the cast permission across the duration window.
+    #[test]
+    fn duration_scoped_cast_from_tracked_exile_grant_emits_play_from_exile() {
+        let e =
+            parse_effect("Until end of turn, you may cast spells from among those exiled cards.");
+        let Effect::GrantCastingPermission {
+            permission,
+            target,
+            grantee,
+        } = e
+        else {
+            panic!("expected GrantCastingPermission, got {e:?}");
+        };
+        let CastingPermission::PlayFromExile {
+            duration,
+            mana_spend_permission,
+            ..
+        } = permission
+        else {
+            panic!("expected PlayFromExile permission");
+        };
+        assert_eq!(duration, Duration::UntilEndOfTurn);
+        assert_eq!(mana_spend_permission, None);
+        assert_eq!(
+            target,
+            TargetFilter::TrackedSet {
+                id: TrackedSetId(0)
+            }
+        );
+        assert_eq!(
+            grantee,
+            crate::types::ability::PermissionGrantee::AbilityController
+        );
+    }
+
+    /// CR 400.7i + CR 609.4b: Conjuncted any-color mana variant —
+    /// "Until end of turn, you may cast spells from among those exiled cards,
+    /// and you may spend mana as though it were mana of any color to cast
+    /// those spells." (Nassari Dean of Expression, Stolen Strategy.) The
+    /// any-color conjunct folds into the same `PlayFromExile` permission via
+    /// `mana_spend_permission: AnyTypeOrColor` rather than producing a
+    /// separate `SpendManaAsAnyColor` static — both parts of the permission
+    /// must bind to the same tracked exile set so the mana grant scopes
+    /// correctly.
+    #[test]
+    fn duration_scoped_cast_from_tracked_exile_grant_with_any_color_conjunct() {
+        let e = parse_effect(
+            "Until end of turn, you may cast spells from among those exiled cards, \
+             and you may spend mana as though it were mana of any color to cast those spells.",
+        );
+        let Effect::GrantCastingPermission {
+            permission, target, ..
+        } = e
+        else {
+            panic!("expected GrantCastingPermission, got {e:?}");
+        };
+        let CastingPermission::PlayFromExile {
+            duration,
+            mana_spend_permission,
+            ..
+        } = permission
+        else {
+            panic!("expected PlayFromExile permission");
+        };
+        assert_eq!(duration, Duration::UntilEndOfTurn);
+        assert_eq!(
+            mana_spend_permission,
+            Some(ManaSpendPermission::AnyTypeOrColor)
+        );
+        assert_eq!(
+            target,
+            TargetFilter::TrackedSet {
+                id: TrackedSetId(0)
+            }
+        );
+    }
+
+    /// CR 400.7i: The "from among the exiled cards" determiner variant must
+    /// dispatch identically to the "those exiled cards" variant — both refer
+    /// to the same tracked-set anaphor, only the determiner differs.
+    #[test]
+    fn duration_scoped_cast_from_tracked_exile_grant_handles_the_determiner() {
+        let e = parse_effect("Until end of turn, you may cast spells from among the exiled cards.");
+        let Effect::GrantCastingPermission {
+            permission, target, ..
+        } = e
+        else {
+            panic!("expected GrantCastingPermission, got {e:?}");
+        };
+        let CastingPermission::PlayFromExile { duration, .. } = permission else {
+            panic!("expected PlayFromExile permission");
+        };
+        assert_eq!(duration, Duration::UntilEndOfTurn);
+        assert_eq!(
+            target,
+            TargetFilter::TrackedSet {
+                id: TrackedSetId(0)
+            }
+        );
+    }
+
+    /// CR 400.7i + CR 611.2b: "Until your next turn" duration variant must
+    /// patch the permission's duration field correctly so the prune step at
+    /// `layers.rs::prune_play_from_exile_at_cleanup` expires the grant on the
+    /// grantee's next untap step rather than at this turn's cleanup.
+    #[test]
+    fn duration_scoped_cast_from_tracked_exile_grant_handles_until_next_turn() {
+        let e = parse_effect(
+            "Until your next turn, you may cast spells from among those exiled cards.",
+        );
+        let Effect::GrantCastingPermission { permission, .. } = e else {
+            panic!("expected GrantCastingPermission, got {e:?}");
+        };
+        let CastingPermission::PlayFromExile { duration, .. } = permission else {
+            panic!("expected PlayFromExile permission");
+        };
+        assert!(
+            matches!(duration, Duration::UntilNextTurnOf { .. }),
+            "expected UntilNextTurnOf, got {duration:?}"
+        );
+    }
+
+    /// CR 610.3: Negative — bare "cast spells from among those exiled cards"
+    /// (no "you may" prefix, no duration) must continue to dispatch to the
+    /// single-resolution `Effect::CastFromZone { ExiledBySource }` path. The
+    /// duration-scoped grant helper must NOT hijack inputs that lack the
+    /// "you may cast" optional prefix.
+    #[test]
+    fn bare_cast_from_among_those_exiled_cards_unchanged() {
+        let e = parse_effect("cast spells from among those exiled cards");
+        let Effect::CastFromZone { target, .. } = e else {
+            panic!(
+                "bare cast must remain CastFromZone, got {e:?} (regression: \
+                 duration-scoped grant helper must require 'you may cast' prefix)"
+            );
         };
         assert_eq!(target, TargetFilter::ExiledBySource);
     }
