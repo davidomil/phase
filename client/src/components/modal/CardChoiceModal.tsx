@@ -32,6 +32,10 @@ type ReturnToHandForCost = Extract<WaitingFor, { type: "ReturnToHandForCost" }>;
 type BlightChoice = Extract<WaitingFor, { type: "BlightChoice" }>;
 type BeholdForCost = Extract<WaitingFor, { type: "BeholdForCost" }>;
 type ExileForCost = Extract<WaitingFor, { type: "ExileForCost" }>;
+type DiscardForManaAbility = Extract<WaitingFor, { type: "DiscardForManaAbility" }>;
+type ExileFromBattlefieldForManaAbility = Extract<WaitingFor, { type: "ExileFromBattlefieldForManaAbility" }>;
+type SacrificeForManaAbility = Extract<WaitingFor, { type: "SacrificeForManaAbility" }>;
+type PayManaAbilityMana = Extract<WaitingFor, { type: "PayManaAbilityMana" }>;
 type CollectEvidenceChoice = Extract<WaitingFor, { type: "CollectEvidenceChoice" }>;
 type HarmonizeTapChoice = Extract<WaitingFor, { type: "HarmonizeTapChoice" }>;
 type PairChoice = Extract<WaitingFor, { type: "PairChoice" }>;
@@ -212,6 +216,36 @@ export function CardChoiceModal() {
     case "ExileForCost":
       if (!canActForWaitingState) return null;
       return <ExileForCostDispatch data={waitingFor.data} />;
+    case "DiscardForManaAbility":
+      if (!canActForWaitingState) return null;
+      return <DiscardModal data={waitingFor.data} title="Discard for mana ability" />;
+    case "ExileFromBattlefieldForManaAbility":
+      if (!canActForWaitingState) return null;
+      return <PermanentCostModal
+        data={waitingFor.data}
+        choices={waitingFor.data.permanents}
+        title="Exile"
+        subtitle={`Choose ${waitingFor.data.count} permanent${waitingFor.data.count > 1 ? "s" : ""} to exile`}
+        label="Exile"
+        selectedClassName="z-10 ring-2 ring-violet-300/80"
+        overlayClassName="absolute inset-0 flex items-center justify-center rounded-lg bg-violet-500/20"
+        badgeClassName="rounded-full bg-violet-500/90 px-3 py-1 text-xs font-bold text-white"
+      />;
+    case "SacrificeForManaAbility":
+      if (!canActForWaitingState) return null;
+      return <PermanentCostModal
+        data={waitingFor.data}
+        choices={waitingFor.data.permanents}
+        title="Sacrifice"
+        subtitle={`Choose ${waitingFor.data.count} permanent${waitingFor.data.count > 1 ? "s" : ""} to sacrifice`}
+        label="Sacrifice"
+        selectedClassName="z-10 ring-2 ring-red-400/80"
+        overlayClassName="absolute inset-0 flex items-center justify-center rounded-lg bg-red-500/20"
+        badgeClassName="rounded-full bg-red-500/90 px-3 py-1 text-xs font-bold text-white"
+      />;
+    case "PayManaAbilityMana":
+      if (!canActForWaitingState) return null;
+      return <PayManaAbilityManaModal data={waitingFor.data} />;
     case "CollectEvidenceChoice":
       if (!canActForWaitingState) return null;
       return <CollectEvidenceModal data={waitingFor.data} />;
@@ -957,7 +991,7 @@ function EffectZoneModal({ data }: { data: EffectZoneChoice["data"] }) {
   const objects = useGameStore((s) => s.gameState?.objects);
   const hoverProps = useInspectHoverProps();
   const [selected, setSelected] = useState<Set<ObjectId>>(new Set());
-  const isSacrifice = data.zone === "Battlefield";
+  const isSacrifice = data.zone === "Battlefield" && data.destination == null;
   const isUpTo = data.up_to === true;
   const minCount = data.min_count ?? 0;
 
@@ -988,13 +1022,20 @@ function EffectZoneModal({ data }: { data: EffectZoneChoice["data"] }) {
   const isReady = isUpTo
     ? selected.size >= minCount && selected.size <= data.count
     : selected.size === data.count;
-  const title = isSacrifice ? "Sacrifice" : "Put onto Battlefield";
+  const isTopdeck = data.effect_kind === "PutAtLibraryPosition";
+  const title = isSacrifice ? "Sacrifice" : isTopdeck ? "Put on Library" : "Put onto Battlefield";
   const subtitle = isSacrifice
     ? isUpTo
       ? minCount > 0
         ? `Choose ${minCount}-${data.count} permanent${data.count > 1 ? "s" : ""} to sacrifice`
         : `Choose up to ${data.count} permanent${data.count > 1 ? "s" : ""} to sacrifice`
       : `Choose ${data.count} permanent${data.count > 1 ? "s" : ""} to sacrifice`
+    : isTopdeck
+      ? isUpTo
+        ? minCount > 0
+          ? `Choose ${minCount}-${data.count} card${data.count > 1 ? "s" : ""} to put on top of your library`
+          : `Choose up to ${data.count} card${data.count > 1 ? "s" : ""} to put on top of your library`
+        : `Choose ${data.count} card${data.count > 1 ? "s" : ""} to put on top of your library`
     : isUpTo
       ? minCount > 0
         ? `Choose ${minCount}-${data.count} card${data.count > 1 ? "s" : ""} to put onto the battlefield`
@@ -1002,11 +1043,11 @@ function EffectZoneModal({ data }: { data: EffectZoneChoice["data"] }) {
       : `Choose ${data.count} card${data.count > 1 ? "s" : ""} to put onto the battlefield`;
   const actionLabel = selected.size === 0 && isUpTo && minCount === 0
     ? (isSacrifice ? "Skip" : "Decline")
-    : `${isSacrifice ? "Confirm" : "Put"} (${selected.size}/${data.count})`;
-  const ringClass = isSacrifice ? "ring-red-400/80" : "ring-emerald-400/80";
-  const overlayClass = isSacrifice ? "bg-red-500/20" : "bg-emerald-500/20";
-  const badgeClass = isSacrifice ? "bg-red-500/90" : "bg-emerald-500/90";
-  const badgeLabel = isSacrifice ? "Sacrifice" : "Put";
+    : `${isSacrifice ? "Confirm" : isTopdeck ? "Top" : "Put"} (${selected.size}/${data.count})`;
+  const ringClass = isSacrifice ? "ring-red-400/80" : isTopdeck ? "ring-sky-300/80" : "ring-emerald-400/80";
+  const overlayClass = isSacrifice ? "bg-red-500/20" : isTopdeck ? "bg-sky-500/20" : "bg-emerald-500/20";
+  const badgeClass = isSacrifice ? "bg-red-500/90" : isTopdeck ? "bg-sky-500/90" : "bg-emerald-500/90";
+  const badgeLabel = isSacrifice ? "Sacrifice" : isTopdeck ? "Top" : "Put";
 
   return (
     <ChoiceOverlay
@@ -1137,6 +1178,7 @@ function SacrificeModal({ data }: { data: SacrificeForCost["data"] }) {
   return (
     <PermanentCostModal
       data={data}
+      choices={data.permanents}
       title="Sacrifice"
       subtitle={`Choose ${data.count} permanent${data.count > 1 ? "s" : ""} to sacrifice`}
       label="Sacrifice"
@@ -1151,6 +1193,7 @@ function ReturnToHandModal({ data }: { data: ReturnToHandForCost["data"] }) {
   return (
     <PermanentCostModal
       data={data}
+      choices={data.permanents}
       title="Return"
       subtitle={`Choose ${data.count} permanent${data.count > 1 ? "s" : ""} to return`}
       label="Return"
@@ -1163,6 +1206,7 @@ function ReturnToHandModal({ data }: { data: ReturnToHandForCost["data"] }) {
 
 function PermanentCostModal({
   data,
+  choices,
   title,
   subtitle,
   label,
@@ -1170,7 +1214,12 @@ function PermanentCostModal({
   overlayClassName,
   badgeClassName,
 }: {
-  data: SacrificeForCost["data"] | ReturnToHandForCost["data"];
+  data:
+    | SacrificeForCost["data"]
+    | ReturnToHandForCost["data"]
+    | ExileFromBattlefieldForManaAbility["data"]
+    | SacrificeForManaAbility["data"];
+  choices: ObjectId[];
   title: string;
   subtitle: string;
   label: string;
@@ -1224,7 +1273,7 @@ function PermanentCostModal({
       }
     >
       <ScrollableCardStrip>
-        {data.permanents.map((id, index) => {
+        {choices.map((id, index) => {
           const obj = objects[id];
           if (!obj) return null;
           const isSelected = selected.has(id);
@@ -1988,7 +2037,10 @@ function DiscardModal({
   title = "Discard",
   canCancel = false,
 }: {
-  data: DiscardToHandSize["data"] & { up_to?: boolean; unless_filter?: TargetFilter };
+  data: (DiscardToHandSize["data"] | DiscardForManaAbility["data"]) & {
+    up_to?: boolean;
+    unless_filter?: TargetFilter;
+  };
   title?: string;
   canCancel?: boolean;
 }) {
@@ -2411,6 +2463,17 @@ function ManaColorChoiceModal({ data }: { data: ChooseManaColor["data"] }) {
   return <ManaSingleColorChoiceModal options={data.choice.data.options} />;
 }
 
+function PayManaAbilityManaModal({ data }: { data: PayManaAbilityMana["data"] }) {
+  return (
+    <ManaCombinationChoiceModal
+      options={data.options}
+      title="Pay Mana Ability Cost"
+      subtitle="Select which mana to spend"
+      actionType="PayManaAbilityMana"
+    />
+  );
+}
+
 function ManaSingleColorChoiceModal({ options }: { options: ManaType[] }) {
   const dispatch = useGameDispatch();
   const [selected, setSelected] = useState<ManaType | null>(null);
@@ -2531,25 +2594,42 @@ function ManaAnyCombinationChoiceModal({
 // CR 605.3b + CR 106.1a: Filter-land combination picker (Shadowmoor/Eventide).
 // Renders one button per combination option, each showing the full mana
 // sequence with the source pips side-by-side.
-function ManaCombinationChoiceModal({ options }: { options: ManaType[][] }) {
+function ManaCombinationChoiceModal({
+  options,
+  title = "Choose Mana Combination",
+  subtitle = "Select which combination of mana to produce",
+  actionType = "ChooseManaColor",
+}: {
+  options: ManaType[][];
+  title?: string;
+  subtitle?: string;
+  actionType?: "ChooseManaColor" | "PayManaAbilityMana";
+}) {
   const dispatch = useGameDispatch();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
   const handleConfirm = useCallback(() => {
     if (selectedIndex !== null) {
-      dispatch({
-        type: "ChooseManaColor",
-        data: {
-          choice: { type: "Combination", data: options[selectedIndex] },
-        },
-      });
+      if (actionType === "PayManaAbilityMana") {
+        dispatch({
+          type: "PayManaAbilityMana",
+          data: { payment: options[selectedIndex] },
+        });
+      } else {
+        dispatch({
+          type: "ChooseManaColor",
+          data: {
+            choice: { type: "Combination", data: options[selectedIndex] },
+          },
+        });
+      }
     }
-  }, [dispatch, options, selectedIndex]);
+  }, [actionType, dispatch, options, selectedIndex]);
 
   return (
     <ChoiceOverlay
-      title="Choose Mana Combination"
-      subtitle="Select which combination of mana to produce"
+      title={title}
+      subtitle={subtitle}
       widthClassName="w-fit max-w-full"
       maxWidthClassName="max-w-lg"
       footer={

@@ -2121,6 +2121,11 @@ fn parse_search_enchant_keyword_suffix(
 pub(super) fn parse_search_destination(lower: &str) -> Zone {
     if scan_contains_phrase(lower, "onto the battlefield") {
         Zone::Battlefield
+    } else if scan_contains_phrase(lower, "exile it")
+        || scan_contains_phrase(lower, "exile that card")
+        || scan_contains_phrase(lower, "exile the card")
+    {
+        Zone::Exile
     } else if contains_possessive(lower, "into", "hand") {
         Zone::Hand
     } else if contains_possessive(lower, "on top of", "library") {

@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use rand::Rng;
+
 use crate::game::effects::change_zone;
 use crate::game::quantity::resolve_quantity_with_targets;
 use crate::game::replacement::{self, ReplacementResult};
@@ -34,12 +36,13 @@ pub fn resolve(
     // the upper-bound expression and the may-pick-fewer flag. Plain
     // `QuantityExpr` means a mandatory count; wrapped in `UpTo` means the
     // player may discard 0..=count.
-    let (num_cards, up_to, unless_filter, target_filter) = match &ability.effect {
-        Effect::DiscardCard { count, target } => (*count, false, None, target.clone()),
+    let (num_cards, up_to, unless_filter, target_filter, random) = match &ability.effect {
+        Effect::DiscardCard { count, target } => (*count, false, None, target.clone(), false),
         Effect::Discard {
             count,
             unless_filter,
             target,
+            random,
             ..
         } => {
             let (inner, up_to) = count.peel_up_to();
@@ -49,9 +52,10 @@ pub fn resolve(
                 up_to,
                 unless_filter.clone(),
                 target.clone(),
+                *random,
             )
         }
-        _ => (1, false, None, TargetFilter::Any),
+        _ => (1, false, None, TargetFilter::Any, false),
     };
 
     // Check if targets specify specific cards to discard
@@ -156,6 +160,26 @@ pub fn resolve(
         if count == 0 && !up_to {
             // CR 608.2c: Effect resolved as no-op (empty hand) — veto downstream IfYouDo.
             state.cost_payment_failed_flag = true;
+        } else if random {
+            let mut remaining = hand_cards;
+            for _ in 0..count {
+                if remaining.is_empty() {
+                    break;
+                }
+                let index = state.rng.random_range(0..remaining.len());
+                let obj_id = remaining.swap_remove(index);
+                if let DiscardOutcome::NeedsReplacementChoice(player) = discard_as_cost_with_source(
+                    state,
+                    obj_id,
+                    discard_player,
+                    Some(ability.source_id),
+                    events,
+                ) {
+                    state.waiting_for =
+                        crate::game::replacement::replacement_choice_waiting_for(player, state);
+                    return Ok(());
+                }
+            }
         } else if hand_cards.is_empty() {
             // up_to=true with empty hand — choosing 0 is the only option, skip interaction.
         } else if !up_to && hand_cards.len() <= count {

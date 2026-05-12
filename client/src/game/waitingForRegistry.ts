@@ -48,6 +48,10 @@ export const HANDLED_WAITING_FOR_TYPES: ReadonlySet<WaitingFor["type"]> =
     "CollectEvidenceChoice",
     // Mana abilities
     "TapCreaturesForManaAbility",
+    "DiscardForManaAbility",
+    "ExileFromBattlefieldForManaAbility",
+    "SacrificeForManaAbility",
+    "PayManaAbilityMana",
     "ChooseManaColor",
     // Combat
     "DeclareAttackers",

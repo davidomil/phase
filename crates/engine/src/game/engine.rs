@@ -4755,6 +4755,7 @@ mod tests {
     use super::*;
     use crate::game::game_object::{BackFaceData, RoomDoor};
     use crate::game::zones::create_object;
+    use crate::parser::oracle::parse_oracle_text;
     use crate::types::ability::{
         AbilityCost, AbilityDefinition, AbilityKind, ControllerRef, Effect, GainLifePlayer,
         ManaContribution, ManaProduction, QuantityExpr, ResolvedAbility, TargetFilter,
@@ -4798,6 +4799,19 @@ mod tests {
             def = def.cost(c);
         }
         def
+    }
+
+    fn apply_spell_oracle_to_object(
+        state: &mut GameState,
+        object_id: ObjectId,
+        name: &str,
+        oracle_text: &str,
+    ) {
+        let types = vec!["Sorcery".to_string()];
+        let parsed = parse_oracle_text(oracle_text, name, &[], &types, &[]);
+        let obj = state.objects.get_mut(&object_id).unwrap();
+        Arc::make_mut(&mut obj.abilities).extend(parsed.abilities.clone());
+        Arc::make_mut(&mut obj.base_abilities).extend(parsed.abilities);
     }
 
     use crate::game::test_fixtures::brushland_colored_ability;
@@ -6843,6 +6857,92 @@ mod tests {
         assert_eq!(state.players[0].library[1], second_hand);
         assert!(!state.players[0].hand.contains(&first_hand));
         assert!(!state.players[0].hand.contains(&second_hand));
+    }
+
+    #[test]
+    fn gamble_searches_to_hand_then_discards_random_card() {
+        let mut state = setup_game_at_main_phase();
+        let gamble = create_object(
+            &mut state,
+            CardId(10),
+            PlayerId(0),
+            "Gamble".to_string(),
+            Zone::Hand,
+        );
+        {
+            let obj = state.objects.get_mut(&gamble).unwrap();
+            obj.card_types.core_types.push(CoreType::Sorcery);
+            obj.base_card_types = obj.card_types.clone();
+        }
+        apply_spell_oracle_to_object(
+            &mut state,
+            gamble,
+            "Gamble",
+            "Search your library for a card, put that card into your hand, discard a card at random, then shuffle.",
+        );
+        let hand_a = create_object(
+            &mut state,
+            CardId(20),
+            PlayerId(0),
+            "Hand A".to_string(),
+            Zone::Hand,
+        );
+        let hand_b = create_object(
+            &mut state,
+            CardId(21),
+            PlayerId(0),
+            "Hand B".to_string(),
+            Zone::Hand,
+        );
+        let target = create_object(
+            &mut state,
+            CardId(30),
+            PlayerId(0),
+            "Tutor Target".to_string(),
+            Zone::Library,
+        );
+
+        apply_as_current(
+            &mut state,
+            GameAction::CastSpell {
+                object_id: gamble,
+                card_id: CardId(10),
+                targets: vec![],
+            },
+        )
+        .unwrap();
+        apply_as_current(&mut state, GameAction::PassPriority).unwrap();
+        let result = apply_as_current(&mut state, GameAction::PassPriority).unwrap();
+        assert!(matches!(
+            result.waiting_for,
+            WaitingFor::SearchChoice { .. }
+        ));
+
+        let mut discard_pool: Vec<ObjectId> = state.players[0].hand.iter().copied().collect();
+        discard_pool.push(target);
+        let expected_discard = {
+            let mut rng = state.rng.clone();
+            let index = rng.random_range(0..discard_pool.len());
+            discard_pool[index]
+        };
+
+        apply_as_current(
+            &mut state,
+            GameAction::SelectCards {
+                cards: vec![target],
+            },
+        )
+        .unwrap();
+
+        assert!(state.players[0].graveyard.contains(&expected_discard));
+        assert!(
+            [hand_a, hand_b, target]
+                .into_iter()
+                .filter(|id| state.players[0].hand.contains(id))
+                .count()
+                == 2
+        );
+        assert!(state.players[0].graveyard.contains(&gamble));
     }
 
     #[test]

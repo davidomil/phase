@@ -140,4 +140,42 @@ describe("Discard cost modal", () => {
 
     expect(dispatchMock).toHaveBeenCalledWith({ type: "CancelCast" });
   });
+
+  it("handles discard prompts for mana ability costs", () => {
+    setWaitingFor({
+      type: "DiscardForManaAbility",
+      data: {
+        player: 0,
+        count: 1,
+        cards: [],
+        pending_mana_ability: {},
+      },
+    } as unknown as WaitingFor);
+
+    render(<CardChoiceModal />);
+
+    expect(screen.getByText("Discard for mana ability")).toBeInTheDocument();
+  });
+
+  it("describes library placement without saying battlefield", () => {
+    setWaitingFor({
+      type: "EffectZoneChoice",
+      data: {
+        player: 0,
+        cards: [],
+        count: 2,
+        min_count: 0,
+        up_to: false,
+        source_id: 1,
+        effect_kind: "PutAtLibraryPosition",
+        zone: "Hand",
+      },
+    } as unknown as WaitingFor);
+
+    render(<CardChoiceModal />);
+
+    expect(screen.getByText("Put on Library")).toBeInTheDocument();
+    expect(screen.getByText("Choose 2 cards to put on top of your library")).toBeInTheDocument();
+    expect(screen.queryByText(/battlefield/i)).not.toBeInTheDocument();
+  });
 });

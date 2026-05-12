@@ -8850,6 +8850,26 @@ fn collapse_ephemeral_color_choice_mana(def: &mut AbilityDefinition) {
     }
 }
 
+fn wire_optional_cast_decline_fallback(def: &mut AbilityDefinition) {
+    if def.optional
+        && matches!(
+            def.condition,
+            Some(AbilityCondition::AdditionalCostPaid { .. })
+        )
+        && matches!(&*def.effect, Effect::CastFromZone { .. })
+        && def.else_ability.is_none()
+    {
+        def.else_ability = def.sub_ability.clone();
+    }
+
+    if let Some(sub) = def.sub_ability.as_mut() {
+        wire_optional_cast_decline_fallback(sub);
+    }
+    if let Some(else_ability) = def.else_ability.as_mut() {
+        wire_optional_cast_decline_fallback(else_ability);
+    }
+}
+
 /// Parse a compound effect chain into an `AbilityDefinition` sub-ability chain.
 ///
 /// Phase 1 keeps the existing clause/effect semantics but replaces the fragile
@@ -10823,6 +10843,7 @@ pub(crate) fn lower_effect_chain_ir(ir: &EffectChainIr) -> AbilityDefinition {
     // forward_result branch), so `Attach::resolve` operates on the correct
     // attaching object.
     rewire_attach_forward_result(&mut result);
+    wire_optional_cast_decline_fallback(&mut result);
 
     result
 }
@@ -28989,6 +29010,77 @@ mod snapshot_tests {
             AbilityKind::Spell,
         );
         assert_json_snapshot!("continuation_search_reveal_hand_shuffle", def);
+    }
+
+    #[test]
+    fn continuation_search_exile_then_shuffle() {
+        let def = parse_effect_chain(
+            "search your library for a card, exile it face down, then shuffle",
+            AbilityKind::Spell,
+        );
+
+        let Some(change_zone) = def.sub_ability.as_ref() else {
+            panic!("search should chain into the exile destination");
+        };
+        match &*change_zone.effect {
+            Effect::ChangeZone {
+                origin: Some(Zone::Library),
+                destination: Zone::Exile,
+                target: TargetFilter::Any,
+                ..
+            } => {}
+            other => panic!("expected library-to-exile search destination, got {other:?}"),
+        }
+        let Some(shuffle) = change_zone.sub_ability.as_ref() else {
+            panic!("exile destination should chain into shuffle");
+        };
+        assert!(matches!(&*shuffle.effect, Effect::Shuffle { .. }));
+    }
+
+    #[test]
+    fn beseech_the_mirror_search_exiles_and_has_hand_fallback() {
+        let def = parse_effect_chain(
+            "search your library for a card, exile it face down, then shuffle. if this spell was bargained, you may cast the exiled card without paying its mana cost if that spell's mana value is 4 or less. put the exiled card into your hand if it wasn't cast this way",
+            AbilityKind::Spell,
+        );
+
+        let Some(exile) = def.sub_ability.as_ref() else {
+            panic!("search should chain into exile");
+        };
+        assert!(matches!(
+            &*exile.effect,
+            Effect::ChangeZone {
+                origin: Some(Zone::Library),
+                destination: Zone::Exile,
+                ..
+            }
+        ));
+
+        let cast = exile
+            .sub_ability
+            .as_deref()
+            .and_then(|shuffle| shuffle.sub_ability.as_deref())
+            .expect("shuffle should chain into bargained cast");
+        assert!(matches!(&*cast.effect, Effect::CastFromZone { .. }));
+        assert!(cast.optional);
+        assert!(matches!(
+            cast.condition,
+            Some(AbilityCondition::AdditionalCostPaid { .. })
+        ));
+
+        let hand_fallback = cast
+            .else_ability
+            .as_ref()
+            .expect("condition-false path should put the exiled card into hand");
+        assert!(matches!(
+            &*hand_fallback.effect,
+            Effect::ChangeZoneAll {
+                origin: Some(Zone::Exile),
+                destination: Zone::Hand,
+                target: TargetFilter::TrackedSet { .. },
+                ..
+            }
+        ));
     }
 
     #[test]

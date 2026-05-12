@@ -250,6 +250,7 @@ export type CoreType =
   | "Dungeon";
 
 export type ManaType = "White" | "Blue" | "Black" | "Red" | "Green" | "Colorless";
+export type RoomDoor = "Left" | "Right";
 
 /**
  * Display-layer projection of the engine's `ManaProduction` enum. One variant
@@ -978,6 +979,7 @@ export type GameAction =
   | { type: "ChooseOverloadCost"; data: { use_overload: boolean } }
   | { type: "ChooseBestowCost"; data: { use_bestow: boolean } }
   | { type: "ChoosePermanentTypeSlot"; data: { slot: CoreType } }
+  | { type: "CastSpellForFree"; data: { object_id: ObjectId; card_id: CardId; source_id: ObjectId } }
   | { type: "CastSpellAsMiracle"; data: { object_id: ObjectId; card_id: CardId } }
   | { type: "CastSpellAsMadness"; data: { object_id: ObjectId; card_id: CardId } }
   // CR 702.190a: Cast a spell from hand via the Sneak alternative cost during
@@ -1010,6 +1012,8 @@ export type GameAction =
   | { type: "LearnDecision"; data: { choice: LearnOption } }
   | { type: "ChooseDungeon"; data: { dungeon: DungeonId } }
   | { type: "ChooseDungeonRoom"; data: { room_index: number } }
+  | { type: "UnlockRoomDoor"; data: { object_id: ObjectId; door: RoomDoor } }
+  | { type: "TapForConvoke"; data: { object_id: ObjectId; mana_type: ManaType } }
   | { type: "SelectCategoryPermanents"; data: { choices: (ObjectId | null)[] } }
   | { type: "ChooseX"; data: { value: number } }
   | { type: "SubmitPayAmount"; data: { amount: number } }
@@ -1021,7 +1025,8 @@ export type GameAction =
   | { type: "PassParadigmOffer" }
   | { type: "Debug"; data: DebugAction }
   | { type: "GrantDebugPermission"; data: { player_id: PlayerId } }
-  | { type: "RevokeDebugPermission"; data: { player_id: PlayerId } };
+  | { type: "RevokeDebugPermission"; data: { player_id: PlayerId } }
+  | { type: "Concede"; data: { player_id: PlayerId } };
 
 // CR 605.3b + CR 106.1a: Shape of the prompt surfaced by WaitingFor::ChooseManaColor.
 export type ManaChoicePrompt =

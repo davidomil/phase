@@ -810,7 +810,7 @@ pub fn is_known_effect(effect: &Effect) -> bool {
 /// binds the set to the delayed trigger's later resolution, and
 /// `ChooseFromZone` selects out of it.
 ///
-/// The walk is **transitive** across the sub_ability chain — a grandchild
+/// The walk is **transitive** across continuation branches — a grandchild
 /// referencing `TrackedSet(0)` causes every zone-changing ancestor in the
 /// chain to publish, which (combined with chain-unification at publish
 /// time) merges all affected objects into a single tracked set. This is
@@ -818,21 +818,30 @@ pub fn is_known_effect(effect: &Effect) -> bool {
 /// "Exile target nonland permanent and the top card of your library ...
 /// for each of those cards") expose both exiled objects to the grant.
 fn next_sub_needs_tracked_set(ability: &ResolvedAbility) -> bool {
-    let mut cursor = ability.sub_ability.as_deref();
-    while let Some(sub) = cursor {
-        let consumes = matches!(
-            &sub.effect,
-            Effect::CreateDelayedTrigger {
-                uses_tracked_set: true,
-                ..
-            } | Effect::ChooseFromZone { .. }
-        ) || effect_references_tracked_set(&sub.effect);
-        if consumes {
-            return true;
-        }
-        cursor = sub.sub_ability.as_deref();
-    }
-    false
+    ability
+        .sub_ability
+        .as_deref()
+        .is_some_and(ability_or_branch_references_tracked_set)
+}
+
+fn ability_or_branch_references_tracked_set(ability: &ResolvedAbility) -> bool {
+    let consumes = matches!(
+        &ability.effect,
+        Effect::CreateDelayedTrigger {
+            uses_tracked_set: true,
+            ..
+        } | Effect::ChooseFromZone { .. }
+    ) || effect_references_tracked_set(&ability.effect);
+
+    consumes
+        || ability
+            .sub_ability
+            .as_deref()
+            .is_some_and(ability_or_branch_references_tracked_set)
+        || ability
+            .else_ability
+            .as_deref()
+            .is_some_and(ability_or_branch_references_tracked_set)
 }
 
 /// Returns true if the effect references the most recent tracked set through
@@ -867,6 +876,11 @@ fn effect_references_tracked_set(effect: &Effect) -> bool {
     // Filter positions — the effect's primary target filter may be TrackedSet.
     if let Some(filter) = effect.target_filter() {
         if filter_references_tracked_set(filter) {
+            return true;
+        }
+    }
+    if let Effect::ChangeZoneAll { target, .. } = effect {
+        if filter_references_tracked_set(target) {
             return true;
         }
     }

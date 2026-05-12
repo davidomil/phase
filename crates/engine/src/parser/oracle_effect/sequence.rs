@@ -2014,6 +2014,22 @@ pub(super) fn parse_followup_continuation_ast(
         }
         Effect::ChangeZone {
             origin: Some(Zone::Library),
+            destination: Zone::Exile,
+            ..
+        } if matches!(
+            lower.trim(),
+            "exile it"
+                | "exile it face down"
+                | "exile that card"
+                | "exile that card face down"
+                | "exile the card"
+                | "exile the card face down"
+        ) =>
+        {
+            Some(ContinuationAst::SearchResultClauseHandled)
+        }
+        Effect::ChangeZone {
+            origin: Some(Zone::Library),
             destination: Zone::Hand,
             ..
         } if lower == "put the rest on the bottom of your library in a random order"

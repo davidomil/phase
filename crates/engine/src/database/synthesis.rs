@@ -686,6 +686,26 @@ pub fn synthesize_buyback(face: &mut CardFace) {
     face.additional_cost = Some(AdditionalCost::Optional(cost));
 }
 
+/// CR 702.166a: Synthesize `additional_cost` from `Keyword::Bargain`.
+pub fn synthesize_bargain(face: &mut CardFace) {
+    if face.additional_cost.is_some()
+        || !face.keywords.iter().any(|k| matches!(k, Keyword::Bargain))
+    {
+        return;
+    }
+
+    face.additional_cost = Some(AdditionalCost::Optional(AbilityCost::Sacrifice {
+        target: TargetFilter::Or {
+            filters: vec![
+                TargetFilter::Typed(TypedFilter::new(TypeFilter::Artifact)),
+                TargetFilter::Typed(TypedFilter::new(TypeFilter::Enchantment)),
+                TargetFilter::Typed(TypedFilter::permanent().properties(vec![FilterProp::Token])),
+            ],
+        },
+        count: 1,
+    }));
+}
+
 /// Synthesize Gift optional cost and delivery effect.
 /// Gift is a promise (zero-cost optional additional cost) that sets `additional_cost_paid`
 /// when the player promises the gift. Conditional branches ("if the gift was promised" /
@@ -2525,6 +2545,7 @@ pub fn synthesize_all(face: &mut CardFace) {
     synthesize_changeling_cda(face);
     synthesize_kicker(face);
     synthesize_buyback(face);
+    synthesize_bargain(face);
     synthesize_gift(face);
     resolve_kicker_condition_variants(face);
     synthesize_case_solve(face);
@@ -3254,6 +3275,56 @@ mod buyback_synthesis_tests {
         let mut face = CardFace::default();
         synthesize_buyback(&mut face);
         assert!(face.additional_cost.is_none());
+    }
+}
+
+#[cfg(test)]
+mod bargain_synthesis_tests {
+    use super::*;
+
+    #[test]
+    fn synthesize_bargain_sets_optional_sacrifice_additional_cost() {
+        let mut face = CardFace {
+            keywords: vec![Keyword::Bargain],
+            ..CardFace::default()
+        };
+
+        synthesize_bargain(&mut face);
+
+        match face.additional_cost.expect("additional_cost set") {
+            AdditionalCost::Optional(AbilityCost::Sacrifice { target, count }) => {
+                assert_eq!(count, 1);
+                let TargetFilter::Or { filters } = target else {
+                    panic!("expected artifact/enchantment/token disjunction, got {target:?}");
+                };
+                assert!(
+                    filters.contains(&TargetFilter::Typed(TypedFilter::new(TypeFilter::Artifact)))
+                );
+                assert!(filters.contains(&TargetFilter::Typed(TypedFilter::new(
+                    TypeFilter::Enchantment
+                ))));
+                assert!(filters.contains(&TargetFilter::Typed(
+                    TypedFilter::permanent().properties(vec![FilterProp::Token])
+                )));
+            }
+            other => panic!("expected Optional(Sacrifice), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synthesize_bargain_skips_when_additional_cost_already_set() {
+        let existing = AdditionalCost::Required(AbilityCost::Mana {
+            cost: ManaCost::generic(1),
+        });
+        let mut face = CardFace {
+            keywords: vec![Keyword::Bargain],
+            additional_cost: Some(existing.clone()),
+            ..CardFace::default()
+        };
+
+        synthesize_bargain(&mut face);
+
+        assert_eq!(face.additional_cost, Some(existing));
     }
 }
 
