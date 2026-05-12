@@ -1191,6 +1191,10 @@ fn parse_static_line_inner(text: &str, inverted: InvertedAsLongAs) -> Option<Sta
         return Some(def);
     }
 
+    if let Some(def) = parse_contextual_continuous_subject_static(&tp, &text) {
+        return Some(def);
+    }
+
     // --- "~ has [keyword] as long as ..." (must be before generic self-ref "has") ---
     if let Some(has_pos) = tp.find(" has ") {
         if let Some(cond_pos) = tp.find(" as long as ") {
@@ -3416,6 +3420,90 @@ fn parse_conditional_static(text: &str) -> Option<StaticDefinition> {
     });
     def.description = Some(text.to_string());
     Some(def)
+}
+
+fn parse_contextual_continuous_subject_static(
+    tp: &TextPair<'_>,
+    description: &str,
+) -> Option<StaticDefinition> {
+    let (subject, verb_prefix, rest_lower) = continuous_subject_verb(tp.lower)?;
+    let subject_original = tp.original[..subject.len()].trim();
+    let after = &tp.original[tp.original.len() - rest_lower.len()..];
+    let predicate = format!("{verb_prefix}{after}");
+    let condition = predicate_condition(&predicate);
+    let affected =
+        contextual_continuous_subject_filter(subject, subject_original, condition.as_ref())?;
+    parse_continuous_gets_has(&predicate, affected, description)
+}
+
+fn continuous_subject_verb(lower: &str) -> Option<(&str, &'static str, &str)> {
+    let (subject, verb_prefix, rest) = nom_primitives::scan_preceded(lower, |input| {
+        alt((
+            value("gets ", tag::<_, _, OracleError<'_>>("gets ")),
+            value("gets ", tag("get ")),
+            value("has ", tag("has ")),
+            value("has ", tag("have ")),
+        ))
+        .parse(input)
+    })?;
+    Some((subject.trim(), verb_prefix, rest))
+}
+
+fn predicate_condition(predicate: &str) -> Option<StaticCondition> {
+    let lower = predicate.to_lowercase();
+    let tp = TextPair::new(predicate, &lower);
+    let (_, condition_tp) = tp.split_around(" as long as ")?;
+    let condition_text = condition_tp.original.trim().trim_end_matches('.');
+    parse_static_condition(condition_text)
+}
+
+fn contextual_continuous_subject_filter(
+    subject_lower: &str,
+    subject_original: &str,
+    condition: Option<&StaticCondition>,
+) -> Option<TargetFilter> {
+    if subject_lower == "that creature" {
+        return condition
+            .and_then(exactly_one_creature_you_control_filter)
+            .cloned();
+    }
+
+    let subject_tp = TextPair::new(subject_original, subject_lower);
+    let group_subject_tp = nom_tag_tp(&subject_tp, "~ and ")
+        .or_else(|| nom_tag_tp(&subject_tp, "this creature and "))?;
+    let group_filter = parse_continuous_subject_filter(group_subject_tp.original)?;
+    Some(TargetFilter::Or {
+        filters: vec![TargetFilter::SelfRef, group_filter],
+    })
+}
+
+fn exactly_one_creature_you_control_filter(condition: &StaticCondition) -> Option<&TargetFilter> {
+    match condition {
+        StaticCondition::QuantityComparison {
+            lhs:
+                QuantityExpr::Ref {
+                    qty: QuantityRef::ObjectCount { filter },
+                },
+            comparator: Comparator::EQ,
+            rhs: QuantityExpr::Fixed { value: 1 },
+        } if is_creature_you_control_filter(filter) => Some(filter),
+        _ => None,
+    }
+}
+
+fn is_creature_you_control_filter(filter: &TargetFilter) -> bool {
+    match filter {
+        TargetFilter::Typed(TypedFilter {
+            type_filters,
+            controller: Some(ControllerRef::You),
+            ..
+        }) => type_filters
+            .iter()
+            .any(|type_filter| type_filter == &TypeFilter::Creature),
+        TargetFilter::And { filters } => filters.iter().any(is_creature_you_control_filter),
+        TargetFilter::Or { filters } => filters.iter().all(is_creature_you_control_filter),
+        _ => false,
+    }
 }
 
 fn parse_soulbond_paired_static(tp: &TextPair<'_>, description: &str) -> Option<StaticDefinition> {
@@ -10143,6 +10231,125 @@ mod tests {
                 comparator: Comparator::GE,
                 rhs: QuantityExpr::Fixed { value: 4 },
             })
+        ));
+    }
+
+    #[test]
+    fn static_exactly_one_creature_binds_that_creature_to_controlled_creature() {
+        let def = parse_static_line(
+            "As long as you control exactly one creature, that creature gets +2/+0 and has deathtouch and lifelink.",
+        )
+        .unwrap();
+
+        assert_eq!(def.mode, StaticMode::Continuous);
+        assert!(matches!(
+            def.affected,
+            Some(TargetFilter::Typed(ref filter))
+                if filter.type_filters.iter().any(|type_filter| type_filter == &TypeFilter::Creature)
+                    && filter.controller == Some(ControllerRef::You)
+        ));
+        assert!(def
+            .modifications
+            .iter()
+            .any(|modification| modification == &ContinuousModification::AddPower { value: 2 }));
+        assert!(def.modifications.iter().any(|modification| modification
+            == &ContinuousModification::AddKeyword {
+                keyword: Keyword::Deathtouch,
+            }));
+        assert!(matches!(
+            def.condition,
+            Some(StaticCondition::QuantityComparison {
+                comparator: Comparator::EQ,
+                rhs: QuantityExpr::Fixed { value: 1 },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn static_exactly_one_qualified_creature_reuses_condition_filter() {
+        let def = parse_static_line(
+            "As long as you control exactly one creature with flying, that creature gets +2/+0.",
+        )
+        .unwrap();
+
+        let condition_filter = match &def.condition {
+            Some(StaticCondition::QuantityComparison {
+                lhs:
+                    QuantityExpr::Ref {
+                        qty: QuantityRef::ObjectCount { filter },
+                    },
+                ..
+            }) => filter,
+            other => panic!("expected object-count condition, got {other:?}"),
+        };
+
+        assert_eq!(def.affected.as_ref(), Some(condition_filter));
+        assert!(def
+            .modifications
+            .contains(&ContinuousModification::AddPower { value: 2 }));
+    }
+
+    #[test]
+    fn static_self_and_land_creatures_you_control_share_pump() {
+        let def = parse_static_line(
+            "As long as you control six or more lands, this creature and land creatures you control get +2/+2.",
+        )
+        .unwrap();
+
+        assert_eq!(def.mode, StaticMode::Continuous);
+        assert!(matches!(
+            def.affected,
+            Some(TargetFilter::Or { ref filters })
+                if filters.iter().any(|filter| filter == &TargetFilter::SelfRef)
+                    && filters.iter().any(|filter| matches!(
+                        filter,
+                        TargetFilter::Typed(typed)
+                            if typed.type_filters.iter().any(|type_filter| type_filter == &TypeFilter::Creature)
+                                && typed.type_filters.iter().any(|type_filter| type_filter == &TypeFilter::Land)
+                                && typed.controller == Some(ControllerRef::You)
+                    ))
+        ));
+        assert!(def
+            .modifications
+            .iter()
+            .any(|modification| modification == &ContinuousModification::AddPower { value: 2 }));
+        assert!(
+            def.modifications
+                .iter()
+                .any(|modification| modification
+                    == &ContinuousModification::AddToughness { value: 2 })
+        );
+        assert!(matches!(
+            def.condition,
+            Some(StaticCondition::QuantityComparison {
+                comparator: Comparator::GE,
+                rhs: QuantityExpr::Fixed { value: 6 },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn static_self_and_group_subject_delegates_group_filter() {
+        let def = parse_static_line(
+            "As long as you control six or more lands, this creature and Warriors you control get +2/+2.",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            def.affected,
+            Some(TargetFilter::Or { ref filters })
+                if filters.contains(&TargetFilter::SelfRef)
+                    && filters.iter().any(|filter| matches!(
+                        filter,
+                        TargetFilter::Typed(typed)
+                            if typed.type_filters.iter().any(|type_filter| matches!(
+                                type_filter,
+                                TypeFilter::Subtype(subtype) if subtype == "Warrior"
+                            ))
+                                && typed.controller == Some(ControllerRef::You)
+                    ))
         ));
     }
 
