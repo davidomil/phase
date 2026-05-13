@@ -53,6 +53,7 @@ fn is_data_carrying_static(mode: &StaticMode) -> bool {
             | StaticMode::ActivateAsInstant { .. }
             | StaticMode::MaximumHandSize { .. }
             | StaticMode::RetainUnspentMana { .. }
+            | StaticMode::TransformUnspentManaOnLoss { .. }
             | StaticMode::CantBeBlockedBy { .. }
             // CR 602.5 + CR 603.2a: CantBeActivated carries `who` + `source_filter`.
             | StaticMode::CantBeActivated { .. }
@@ -6132,6 +6133,10 @@ fn audit_card_lines(oracle_text: &str, face: &CardFace) -> Vec<SemanticFinding> 
             StaticMode::RetainUnspentMana { .. } => {
                 effective_lower.contains("don't lose unspent")
                     && effective_lower.contains("mana as steps and phases end")
+            }
+            StaticMode::TransformUnspentManaOnLoss { .. } => {
+                effective_lower.contains("would lose unspent mana")
+                    && effective_lower.contains("becomes")
             }
             StaticMode::CanAttackWithDefender => {
                 effective_lower.contains("as though it didn't have defender")

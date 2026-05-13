@@ -8,7 +8,7 @@ use super::ability::{
     AbilityCost, CardPlayMode, CostCategory, QuantityExpr, QuantityRef, TargetFilter,
 };
 use super::keywords::Keyword;
-use super::mana::{ManaColor, ManaCost};
+use super::mana::{ManaColor, ManaCost, ManaType};
 use super::phase::Phase;
 use super::zones::Zone;
 
@@ -732,6 +732,21 @@ pub enum StaticMode {
     RetainUnspentMana {
         color: Option<ManaColor>,
     },
+    /// CR 614.1a + CR 703.4q: "If you would lose unspent mana, that mana
+    /// becomes [type] instead." The affected player's about-to-be-emptied
+    /// unspent mana is recolored to `to` rather than removed.
+    ///
+    /// Implemented inline alongside `RetainUnspentMana` rather than through
+    /// the replacement pipeline because there is no existing `LoseMana` event
+    /// machinery and 4 cards do not justify lifting an entire new event class.
+    /// **Refactor trigger:** if a third step-end unspent-mana variant lands
+    /// (e.g., "Whenever you lose unspent mana, ..." or a different rewrite),
+    /// parameterize this and `RetainUnspentMana` under a single
+    /// `StepEndUnspentMana { color_filter, action }` umbrella per the
+    /// sibling-cluster smell rule.
+    TransformUnspentManaOnLoss {
+        to: ManaType,
+    },
     /// CR 702.3b: Allows creatures with defender to attack despite having the keyword.
     /// "can attack as though it didn't have defender" overrides the defender restriction.
     CanAttackWithDefender,
@@ -783,6 +798,7 @@ impl Hash for StaticMode {
             StaticMode::CantBeBlockedBy { .. } => {} // TargetFilter does not implement Hash; discriminant only
             StaticMode::AdditionalLandDrop { count } => count.hash(state),
             StaticMode::RetainUnspentMana { color } => color.hash(state),
+            StaticMode::TransformUnspentManaOnLoss { to } => to.hash(state),
             StaticMode::Other(s) => s.hash(state),
             StaticMode::GraveyardCastPermission {
                 frequency,
@@ -977,6 +993,9 @@ impl fmt::Display for StaticMode {
             StaticMode::SpendManaAsAnyColor => write!(f, "SpendManaAsAnyColor"),
             StaticMode::RetainUnspentMana { color } => {
                 write!(f, "RetainUnspentMana({color:?})")
+            }
+            StaticMode::TransformUnspentManaOnLoss { to } => {
+                write!(f, "TransformUnspentManaOnLoss({to:?})")
             }
             StaticMode::CanAttackWithDefender => write!(f, "CanAttackWithDefender"),
             StaticMode::AssignNoCombatDamage => write!(f, "AssignNoCombatDamage"),
@@ -1201,6 +1220,7 @@ impl FromStr for StaticMode {
             "CantLoseTheGame" => StaticMode::CantLoseTheGame,
             "CanAttackWithDefender" => StaticMode::CanAttackWithDefender,
             s if s.starts_with("RetainUnspentMana(") => StaticMode::Other(s.to_string()),
+            s if s.starts_with("TransformUnspentManaOnLoss(") => StaticMode::Other(s.to_string()),
             "UntapsDuringEachOtherPlayersUntapStep" => {
                 StaticMode::UntapsDuringEachOtherPlayersUntapStep
             }

@@ -40,7 +40,7 @@ use crate::types::ability::{
 use crate::types::card_type::{CoreType, Supertype};
 use crate::types::counter::{parse_counter_type, CounterMatch};
 use crate::types::keywords::{Keyword, KeywordKind};
-use crate::types::mana::{ManaColor, ManaCost};
+use crate::types::mana::{ManaColor, ManaCost, ManaType};
 use crate::types::phase::Phase;
 use crate::types::statics::{
     ActivationExemption, CastFrequency, CastingProhibitionCondition, CostPaymentProhibition,
@@ -68,6 +68,38 @@ fn nom_tag_tp<'a>(tp: &TextPair<'a>, prefix: &str) -> Option<TextPair<'a>> {
             let rest_original = &tp.original[matched.len()..];
             TextPair::new(rest_original, rest_lower)
         })
+}
+
+/// CR 614.1a + CR 703.4q: Parse "If you would lose unspent mana, that mana
+/// becomes [type] instead." — Horizon Stone / Kruphix / Omnath / Ozai class.
+/// Emits a printed `StaticMode::TransformUnspentManaOnLoss` bound to the
+/// source's controller.
+pub(crate) fn try_parse_transform_unspent_mana_static(
+    text: &str,
+    lower: &str,
+) -> Option<StaticDefinition> {
+    nom_on_lower(text, lower, |input| {
+        let (input, _) =
+            tag::<_, _, OracleError<'_>>("if you would lose unspent mana, that mana becomes ")
+                .parse(input)?;
+        let (input, to) = alt((
+            value(ManaType::Colorless, tag("colorless")),
+            map(nom_primitives::parse_color, ManaType::from),
+        ))
+        .parse(input)?;
+        let (input, _) = tag(" instead").parse(input)?;
+        let (input, _) = opt(tag(".")).parse(input)?;
+        eof(input)?;
+        Ok((input, to))
+    })
+    .map(|(to, _)| {
+        StaticDefinition::new(StaticMode::TransformUnspentManaOnLoss { to })
+            .affected(TargetFilter::Controller)
+            .modifications(vec![ContinuousModification::AddStaticMode {
+                mode: StaticMode::TransformUnspentManaOnLoss { to },
+            }])
+            .description(text.to_string())
+    })
 }
 
 pub(crate) fn try_parse_retain_unspent_mana_static(
@@ -678,6 +710,10 @@ fn parse_static_line_inner(text: &str, inverted: InvertedAsLongAs) -> Option<Sta
     }
 
     if let Some(result) = try_parse_retain_unspent_mana_static(&text, &lower) {
+        return Some(result);
+    }
+
+    if let Some(result) = try_parse_transform_unspent_mana_static(&text, &lower) {
         return Some(result);
     }
 
@@ -16409,6 +16445,46 @@ mod tests {
 
         assert_eq!(def.mode, StaticMode::RetainUnspentMana { color: None });
         assert_eq!(def.affected, Some(TargetFilter::Player));
+    }
+
+    #[test]
+    fn static_transform_unspent_mana_colorless() {
+        // CR 614.1a + CR 703.4q: Horizon Stone / Kruphix.
+        let def = parse_static_line(
+            "If you would lose unspent mana, that mana becomes colorless instead.",
+        )
+        .unwrap();
+
+        assert_eq!(
+            def.mode,
+            StaticMode::TransformUnspentManaOnLoss {
+                to: crate::types::mana::ManaType::Colorless,
+            }
+        );
+        assert_eq!(def.affected, Some(TargetFilter::Controller));
+    }
+
+    #[test]
+    fn static_transform_unspent_mana_to_color() {
+        use crate::types::mana::ManaType;
+        // CR 614.1a + CR 703.4q: Omnath, Locus of All (Black) and Ozai (Red).
+        let black =
+            parse_static_line("If you would lose unspent mana, that mana becomes black instead.")
+                .unwrap();
+        assert_eq!(
+            black.mode,
+            StaticMode::TransformUnspentManaOnLoss {
+                to: ManaType::Black,
+            }
+        );
+
+        let red =
+            parse_static_line("If you would lose unspent mana, that mana becomes red instead.")
+                .unwrap();
+        assert_eq!(
+            red.mode,
+            StaticMode::TransformUnspentManaOnLoss { to: ManaType::Red }
+        );
     }
 
     #[test]

@@ -808,22 +808,51 @@ impl ManaPool {
         self.mana.clear();
     }
 
-    /// CR 106.4 + CR 500.5: Clear mana on phase transition, retaining mana that
-    /// either carries an explicit expiry or is covered by an active static rule
-    /// modifier such as "You don't lose unspent red mana as steps and phases end."
+    /// CR 106.4 + CR 500.5 + CR 614.1a: Clear mana on phase transition. Each
+    /// unit runs through two layered checks:
+    ///
+    /// 1. **Retention** (`retained_by_static`, CR 703.4q via Upwelling/Electro):
+    ///    units covered by an active `RetainUnspentMana` rule survive the
+    ///    drop event. Expiry-bound units (`EndOfTurn`, `EndOfCombat`) follow
+    ///    their explicit expiry rule first.
+    /// 2. **Transformation** (`transform_on_loss`, CR 614.1a via Horizon Stone /
+    ///    Kruphix / Omnath / Ozai): a unit that *would* otherwise be dropped
+    ///    is recolored to the target type and kept in the pool instead. Only
+    ///    the first active transformation is applied per unit — multiple
+    ///    coexisting transformations should be ordered by the affected player
+    ///    per CR 616.1, but the four printed cards in this class are
+    ///    mutually exclusive in practice (each pins a different color), and
+    ///    each player can have at most one applicable transformation at a
+    ///    time. If a second transform variant ever ships, surface the
+    ///    ordering choice through `WaitingFor::ChooseReplacementOrder`.
     pub fn clear_step_transition(
         &mut self,
         in_combat: bool,
         entering_cleanup: bool,
         retained_by_static: &[Option<ManaColor>],
+        transform_on_loss: &[ManaType],
     ) {
-        self.mana.retain(|u| match u.expiry {
-            Some(ManaExpiry::EndOfTurn) => !entering_cleanup,
-            Some(ManaExpiry::EndOfCombat) => in_combat,
-            None => retained_by_static.iter().any(|color| match color {
-                None => true,
-                Some(color) => ManaType::from(*color) == u.color,
-            }),
+        self.mana.retain_mut(|u| {
+            let would_drop = match u.expiry {
+                Some(ManaExpiry::EndOfTurn) => entering_cleanup,
+                Some(ManaExpiry::EndOfCombat) => !in_combat,
+                None => !retained_by_static.iter().any(|color| match color {
+                    None => true,
+                    Some(color) => ManaType::from(*color) == u.color,
+                }),
+            };
+            if !would_drop {
+                return true;
+            }
+            if let Some(&new_type) = transform_on_loss.first() {
+                u.color = new_type;
+                // CR 614.1a: The transformed mana replaces the would-be loss
+                // event entirely, so any expiry that triggered the loss is
+                // also dropped — the unit returns to the unrestricted pool.
+                u.expiry = None;
+                return true;
+            }
+            false
         });
     }
 
@@ -1014,11 +1043,11 @@ mod tests {
         pool.add(retained);
         pool.add(make_unit(ManaType::Red));
 
-        pool.clear_step_transition(false, false, &[]);
+        pool.clear_step_transition(false, false, &[], &[]);
         assert_eq!(pool.count_color(ManaType::Green), 1);
         assert_eq!(pool.count_color(ManaType::Red), 0);
 
-        pool.clear_step_transition(false, true, &[]);
+        pool.clear_step_transition(false, true, &[], &[]);
         assert_eq!(pool.total(), 0);
     }
 
@@ -1029,7 +1058,7 @@ mod tests {
         pool.add(make_unit(ManaType::Blue));
         pool.add(make_unit(ManaType::Colorless));
 
-        pool.clear_step_transition(false, false, &[Some(ManaColor::Red)]);
+        pool.clear_step_transition(false, false, &[Some(ManaColor::Red)], &[]);
 
         assert_eq!(pool.count_color(ManaType::Red), 1);
         assert_eq!(pool.count_color(ManaType::Blue), 0);
@@ -1042,10 +1071,47 @@ mod tests {
         pool.add(make_unit(ManaType::Red));
         pool.add(make_unit(ManaType::Colorless));
 
-        pool.clear_step_transition(false, false, &[None]);
+        pool.clear_step_transition(false, false, &[None], &[]);
 
         assert_eq!(pool.count_color(ManaType::Red), 1);
         assert_eq!(pool.count_color(ManaType::Colorless), 1);
+    }
+
+    #[test]
+    fn mana_pool_transform_on_loss_recolors_to_target_type() {
+        // CR 614.1a + CR 703.4q: Horizon Stone — would-be-lost mana becomes
+        // colorless instead. All units are kept and recolored.
+        let mut pool = ManaPool::default();
+        pool.add(make_unit(ManaType::Red));
+        pool.add(make_unit(ManaType::Blue));
+
+        pool.clear_step_transition(false, false, &[], &[ManaType::Colorless]);
+
+        assert_eq!(pool.total(), 2);
+        assert_eq!(pool.count_color(ManaType::Colorless), 2);
+        assert_eq!(pool.count_color(ManaType::Red), 0);
+        assert_eq!(pool.count_color(ManaType::Blue), 0);
+    }
+
+    #[test]
+    fn mana_pool_retention_wins_over_transform_when_both_apply() {
+        // CR 614.6 + CR 703.4q: Retained mana never enters the "would be lost"
+        // event, so a coexisting transform leaves it alone. Only unretained
+        // mana runs through the transform recolor.
+        let mut pool = ManaPool::default();
+        pool.add(make_unit(ManaType::Red));
+        pool.add(make_unit(ManaType::Blue));
+
+        pool.clear_step_transition(
+            false,
+            false,
+            &[Some(ManaColor::Red)],
+            &[ManaType::Colorless],
+        );
+
+        assert_eq!(pool.count_color(ManaType::Red), 1);
+        assert_eq!(pool.count_color(ManaType::Colorless), 1);
+        assert_eq!(pool.count_color(ManaType::Blue), 0);
     }
 
     #[test]

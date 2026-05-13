@@ -6,7 +6,7 @@ use crate::game::layers::{evaluate_condition, evaluate_condition_with_recipient}
 use crate::types::ability::{TargetFilter, TypedFilter};
 use crate::types::game_state::GameState;
 use crate::types::identifiers::ObjectId;
-use crate::types::mana::ManaColor;
+use crate::types::mana::{ManaColor, ManaType};
 use crate::types::player::PlayerId;
 use crate::types::statics::{CostPaymentProhibition, ProhibitionScope, StaticMode};
 
@@ -640,6 +640,31 @@ pub fn player_retained_mana_colors(
     }
 
     colors
+}
+
+/// CR 614.1a + CR 703.4q: Return active mana-transformation rules applying to
+/// `player_id` — "If you would lose unspent mana, that mana becomes [type]
+/// instead" (Horizon Stone / Kruphix / Omnath / Ozai). Scans printed statics
+/// on battlefield permanents only; no spell-installed equivalent ships today.
+pub fn player_transformed_mana_types(state: &GameState, player_id: PlayerId) -> Vec<ManaType> {
+    let context = StaticCheckContext {
+        player_id: Some(player_id),
+        ..Default::default()
+    };
+
+    battlefield_active_statics(state)
+        .filter_map(|(source_obj, def)| {
+            let StaticMode::TransformUnspentManaOnLoss { to } = &def.mode else {
+                return None;
+            };
+            if let Some(ref affected) = def.affected {
+                if !static_filter_matches(state, &context, affected, source_obj.id) {
+                    return None;
+                }
+            }
+            Some(*to)
+        })
+        .collect()
 }
 
 /// CR 118.3 + CR 119.4b + CR 601.2h + CR 602.2b: Check whether a static

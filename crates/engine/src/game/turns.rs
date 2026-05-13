@@ -110,10 +110,23 @@ fn enter_phase(state: &mut GameState, next: Phase, events: &mut Vec<GameEvent>) 
         .iter()
         .map(|player| super::static_abilities::player_retained_mana_colors(state, player.id))
         .collect();
-    for (player, retained_by_static) in state.players.iter_mut().zip(retained_mana_colors.iter()) {
-        player
-            .mana_pool
-            .clear_step_transition(in_combat, entering_cleanup, retained_by_static);
+    let transformed_mana_types: Vec<_> = state
+        .players
+        .iter()
+        .map(|player| super::static_abilities::player_transformed_mana_types(state, player.id))
+        .collect();
+    for ((player, retained_by_static), transform_on_loss) in state
+        .players
+        .iter_mut()
+        .zip(retained_mana_colors.iter())
+        .zip(transformed_mana_types.iter())
+    {
+        player.mana_pool.clear_step_transition(
+            in_combat,
+            entering_cleanup,
+            retained_by_static,
+            transform_on_loss,
+        );
         // CR 121.1 + CR 504.1: `cards_drawn_this_step` resets on every step
         // transition so `ExceptFirstDrawInDrawStep` conditions can identify
         // the first card drawn during the new step (most importantly, the
@@ -1639,6 +1652,67 @@ mod tests {
             state.players[0].mana_pool.count_color(ManaType::Colorless),
             1
         );
+    }
+
+    #[test]
+    fn advance_phase_transforms_unspent_mana_to_target_type() {
+        // CR 614.1a + CR 703.4q: Horizon Stone — would-be-lost mana becomes
+        // colorless instead. RUNTIME test that drives `advance_phase` so the
+        // transform is observed at the live mana-pool step.
+        use crate::types::ability::{StaticDefinition, TargetFilter};
+        use crate::types::mana::{ManaType, ManaUnit};
+        use crate::types::statics::StaticMode;
+
+        let mut state = setup();
+        state.phase = Phase::PreCombatMain;
+        let source = create_object(
+            &mut state,
+            CardId(1),
+            PlayerId(0),
+            "Horizon Stone".to_string(),
+            Zone::Battlefield,
+        );
+        state
+            .objects
+            .get_mut(&source)
+            .unwrap()
+            .static_definitions
+            .push(
+                StaticDefinition::new(StaticMode::TransformUnspentManaOnLoss {
+                    to: ManaType::Colorless,
+                })
+                .affected(TargetFilter::Controller),
+            );
+
+        state.players[0].mana_pool.add(ManaUnit::new(
+            ManaType::Red,
+            ObjectId(10),
+            false,
+            Vec::new(),
+        ));
+        state.players[0].mana_pool.add(ManaUnit::new(
+            ManaType::Blue,
+            ObjectId(11),
+            false,
+            Vec::new(),
+        ));
+        // Opponent has no transform — their mana drains normally.
+        state.players[1].mana_pool.add(ManaUnit::new(
+            ManaType::Red,
+            ObjectId(12),
+            false,
+            Vec::new(),
+        ));
+
+        advance_phase(&mut state, &mut Vec::new());
+
+        assert_eq!(state.players[0].mana_pool.total(), 2);
+        assert_eq!(
+            state.players[0].mana_pool.count_color(ManaType::Colorless),
+            2
+        );
+        assert_eq!(state.players[0].mana_pool.count_color(ManaType::Red), 0);
+        assert_eq!(state.players[1].mana_pool.total(), 0);
     }
 
     #[test]
