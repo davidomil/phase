@@ -9174,6 +9174,12 @@ pub struct ResolvedAbility {
     /// `AbilityCondition::CostPaidObjectMatchesFilter` during resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_paid_object: Option<CostPaidObjectSnapshot>,
+    /// Public characteristics of an object chosen or moved by an earlier
+    /// effect in the same resolving ability. This is distinct from
+    /// `cost_paid_object`: the object was not paid as a cost, but later
+    /// instructions may still refer to it after it left its zone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_context_object: Option<CostPaidObjectSnapshot>,
     /// CR 603.4: Index of the printed ability this resolution came from on the
     /// source object's ability list. Identifies "this ability" for per-turn
     /// resolution tracking (`AbilityCondition::NthResolutionThisTurn`). `None` for
@@ -9226,6 +9232,7 @@ impl ResolvedAbility {
             player_scope: None,
             chosen_x: None,
             cost_paid_object: None,
+            effect_context_object: None,
             ability_index: None,
             may_trigger_origin: None,
             target_selection_mode: TargetSelectionMode::Chosen,
@@ -9265,6 +9272,20 @@ impl ResolvedAbility {
         }
         if let Some(else_branch) = self.else_ability.as_mut() {
             else_branch.set_cost_paid_object_recursive(snapshot);
+        }
+    }
+
+    /// Stamp an object selected by a previous effect in this same resolution
+    /// across the continuation chain. Used by sacrifice-as-effect patterns
+    /// whose later instructions reference "that creature" after it has left
+    /// the battlefield.
+    pub fn set_effect_context_object_recursive(&mut self, snapshot: CostPaidObjectSnapshot) {
+        self.effect_context_object = Some(snapshot.clone());
+        if let Some(sub) = self.sub_ability.as_mut() {
+            sub.set_effect_context_object_recursive(snapshot.clone());
+        }
+        if let Some(else_branch) = self.else_ability.as_mut() {
+            else_branch.set_effect_context_object_recursive(snapshot);
         }
     }
 

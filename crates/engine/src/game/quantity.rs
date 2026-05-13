@@ -1142,25 +1142,32 @@ fn resolve_ref(
             .or(state.last_effect_count)
             .or(state.last_effect_amount)
             .unwrap_or(0),
-        // CR 603.7c: Power of the source object from the triggering event.
+        // CR 608.2c: If an earlier effect in this same resolution captured an
+        // explicit object context, use that object before the original trigger
+        // event. This covers "sacrifice another creature. ... that creature's
+        // power" where the ETB trigger event source is the entering permanent,
+        // not the sacrificed object.
+        //
         // CR 400.7: Falls back to LKI cache for objects that have left their zone.
-        // CR 400.7j + CR 117.1 + CR 608.2k: When no trigger event is in scope
-        // (activated abilities with a cost-paid object referent like Greater
-        // Good's "the sacrificed creature's power"), fall back to the
-        // resolving ability's `cost_paid_object` snapshot captured at cost
-        // payment. The same Oracle phrase semantically refers to one LKI
-        // snapshot regardless of whether the surrounding ability is triggered
-        // or activated.
-        QuantityRef::EventContextSourcePower => state
-            .current_trigger_event
-            .as_ref()
-            .and_then(crate::game::targeting::extract_source_from_event)
-            .and_then(|id| {
+        // CR 400.7j: Other parts of the same effect can find an object that
+        // effect moved to a public zone. CR 608.2k separately covers activated
+        // abilities with a cost-paid object referent like Greater Good's "the
+        // sacrificed creature's power".
+        QuantityRef::EventContextSourcePower => ability
+            .and_then(|a| a.effect_context_object.as_ref())
+            .and_then(|snap| snap.lki.power)
+            .or_else(|| {
                 state
-                    .objects
-                    .get(&id)
-                    .and_then(|obj| obj.power)
-                    .or_else(|| state.lki_cache.get(&id).and_then(|lki| lki.power))
+                    .current_trigger_event
+                    .as_ref()
+                    .and_then(crate::game::targeting::extract_source_from_event)
+                    .and_then(|id| {
+                        state
+                            .objects
+                            .get(&id)
+                            .and_then(|obj| obj.power)
+                            .or_else(|| state.lki_cache.get(&id).and_then(|lki| lki.power))
+                    })
             })
             .or_else(|| {
                 ability
@@ -1168,19 +1175,24 @@ fn resolve_ref(
                     .and_then(|snap| snap.lki.power)
             })
             .unwrap_or(0),
-        // CR 603.7c + CR 400.7j: Toughness of the source object. See
-        // `EventContextSourcePower` above for the trigger → cost-paid-object
-        // fallback rationale.
-        QuantityRef::EventContextSourceToughness => state
-            .current_trigger_event
-            .as_ref()
-            .and_then(crate::game::targeting::extract_source_from_event)
-            .and_then(|id| {
+        // CR 400.7j / CR 608.2k: Toughness of the source object. See
+        // `EventContextSourcePower` above for the trigger → effect-context →
+        // cost-paid-object ordering.
+        QuantityRef::EventContextSourceToughness => ability
+            .and_then(|a| a.effect_context_object.as_ref())
+            .and_then(|snap| snap.lki.toughness)
+            .or_else(|| {
                 state
-                    .objects
-                    .get(&id)
-                    .and_then(|obj| obj.toughness)
-                    .or_else(|| state.lki_cache.get(&id).and_then(|lki| lki.toughness))
+                    .current_trigger_event
+                    .as_ref()
+                    .and_then(crate::game::targeting::extract_source_from_event)
+                    .and_then(|id| {
+                        state
+                            .objects
+                            .get(&id)
+                            .and_then(|obj| obj.toughness)
+                            .or_else(|| state.lki_cache.get(&id).and_then(|lki| lki.toughness))
+                    })
             })
             .or_else(|| {
                 ability
@@ -1188,23 +1200,28 @@ fn resolve_ref(
                     .and_then(|snap| snap.lki.toughness)
             })
             .unwrap_or(0),
-        // CR 603.7c + CR 400.7j: Mana value of the source object. See
-        // `EventContextSourcePower` above for the trigger → cost-paid-object
-        // fallback rationale.
-        QuantityRef::EventContextSourceManaValue => state
-            .current_trigger_event
-            .as_ref()
-            .and_then(crate::game::targeting::extract_source_from_event)
-            .and_then(|id| {
+        // CR 400.7j / CR 608.2k: Mana value of the source object. See
+        // `EventContextSourcePower` above for the trigger → effect-context →
+        // cost-paid-object ordering.
+        QuantityRef::EventContextSourceManaValue => ability
+            .and_then(|a| a.effect_context_object.as_ref())
+            .map(|snap| u32_to_i32_saturating(snap.lki.mana_value))
+            .or_else(|| {
                 state
-                    .objects
-                    .get(&id)
-                    .map(|obj| u32_to_i32_saturating(obj.mana_cost.mana_value()))
-                    .or_else(|| {
+                    .current_trigger_event
+                    .as_ref()
+                    .and_then(crate::game::targeting::extract_source_from_event)
+                    .and_then(|id| {
                         state
-                            .lki_cache
+                            .objects
                             .get(&id)
-                            .map(|lki| u32_to_i32_saturating(lki.mana_value))
+                            .map(|obj| u32_to_i32_saturating(obj.mana_cost.mana_value()))
+                            .or_else(|| {
+                                state
+                                    .lki_cache
+                                    .get(&id)
+                                    .map(|lki| u32_to_i32_saturating(lki.mana_value))
+                            })
                     })
             })
             .or_else(|| {

@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use crate::game::filter;
 use crate::game::speed::has_max_speed;
 use crate::types::ability::{
-    AbilityCondition, AbilityCost, AbilityKind, ControllerRef, Effect, EffectError, EffectKind,
-    FilterProp, PlayerFilter, QuantityExpr, QuantityRef, ResolvedAbility, SharedQuality,
-    SharedQualityRelation, TargetFilter, TargetRef,
+    AbilityCondition, AbilityCost, AbilityKind, ControllerRef, CostPaidObjectSnapshot, Effect,
+    EffectError, EffectKind, FilterProp, PlayerFilter, QuantityExpr, QuantityRef, ResolvedAbility,
+    SharedQuality, SharedQualityRelation, TargetFilter, TargetRef,
 };
 use crate::types::events::GameEvent;
 use crate::types::game_state::{
@@ -413,6 +413,34 @@ fn prepend_to_pending_continuation(state: &mut GameState, mut head: ResolvedAbil
         });
     } else {
         state.pending_continuation = Some(PendingContinuation::new(Box::new(head)));
+    }
+}
+
+pub(crate) fn sacrificed_object_context_from_events(
+    state: &GameState,
+    events: &[GameEvent],
+) -> Option<CostPaidObjectSnapshot> {
+    events.iter().find_map(|event| match event {
+        GameEvent::PermanentSacrificed { object_id, .. } => state
+            .lki_cache
+            .get(object_id)
+            .cloned()
+            .map(|lki| CostPaidObjectSnapshot {
+                object_id: *object_id,
+                lki,
+            }),
+        _ => None,
+    })
+}
+
+fn apply_parent_chain_context(
+    child: &mut ResolvedAbility,
+    parent: &ResolvedAbility,
+    effect_context_object: Option<&CostPaidObjectSnapshot>,
+) {
+    child.context = parent.context.clone();
+    if let Some(snapshot) = effect_context_object {
+        child.set_effect_context_object_recursive(snapshot.clone());
     }
 }
 
@@ -2056,6 +2084,11 @@ pub fn resolve_ability_chain(
     } else {
         vec![]
     };
+    let effect_context_object = if matches!(ability.effect, Effect::Sacrifice { .. }) {
+        sacrificed_object_context_from_events(state, &events[events_before..])
+    } else {
+        None
+    };
 
     // Follow typed sub_ability chain, propagating parent targets when sub has none.
     // This allows sub-abilities like "its controller gains life" to access the object
@@ -2079,7 +2112,11 @@ pub fn resolve_ability_chain(
                     if resolved.targets.is_empty() && !ability.targets.is_empty() {
                         resolved.targets = ability.targets.clone();
                     }
-                    resolved.context = ability.context.clone();
+                    apply_parent_chain_context(
+                        &mut resolved,
+                        ability,
+                        effect_context_object.as_ref(),
+                    );
                     if !matches!(state.waiting_for, WaitingFor::Priority { .. }) {
                         debug_assert!(
                             state.pending_continuation.is_none(),
@@ -2103,7 +2140,11 @@ pub fn resolve_ability_chain(
                     if resolved.targets.is_empty() && !ability.targets.is_empty() {
                         resolved.targets = ability.targets.clone();
                     }
-                    resolved.context = ability.context.clone();
+                    apply_parent_chain_context(
+                        &mut resolved,
+                        ability,
+                        effect_context_object.as_ref(),
+                    );
                     // If the parent effect entered an interactive state (e.g.,
                     // SearchChoice), stash the else chain as a continuation so it
                     // runs after the player responds — not immediately.
@@ -2150,7 +2191,11 @@ pub fn resolve_ability_chain(
                     } else if else_resolved.targets.is_empty() && !ability.targets.is_empty() {
                         else_resolved.targets = ability.targets.clone();
                     }
-                    else_resolved.context = ability.context.clone();
+                    apply_parent_chain_context(
+                        &mut else_resolved,
+                        ability,
+                        effect_context_object.as_ref(),
+                    );
                     resolve_ability_chain(state, &else_resolved, events, depth + 1)?;
                 }
                 return Ok(());
@@ -2185,7 +2230,11 @@ pub fn resolve_ability_chain(
                         )
                         .map_err(|e| EffectError::InvalidParam(e.to_string()))?;
                         let mut reflexive = sub.as_ref().clone();
-                        reflexive.context = ability.context.clone();
+                        apply_parent_chain_context(
+                            &mut reflexive,
+                            ability,
+                            effect_context_object.as_ref(),
+                        );
                         crate::game::ability_utils::assign_targets_in_chain(
                             state,
                             &mut reflexive,
@@ -2208,7 +2257,11 @@ pub fn resolve_ability_chain(
                     .map_err(|e| EffectError::InvalidParam(e.to_string()))?;
 
                     let mut reflexive = sub.as_ref().clone();
-                    reflexive.context = ability.context.clone();
+                    apply_parent_chain_context(
+                        &mut reflexive,
+                        ability,
+                        effect_context_object.as_ref(),
+                    );
                     let trigger_description = sub
                         .description
                         .clone()
@@ -2254,8 +2307,7 @@ pub fn resolve_ability_chain(
             if sub_clone.targets.is_empty() && !ability.targets.is_empty() {
                 sub_clone.targets = ability.targets.clone();
             }
-            // Propagate SpellContext so kicker/optional flags survive continuations.
-            sub_clone.context = ability.context.clone();
+            apply_parent_chain_context(&mut sub_clone, ability, effect_context_object.as_ref());
             prepend_to_pending_continuation(state, sub_clone);
             return Ok(());
         }
@@ -2275,7 +2327,11 @@ pub fn resolve_ability_chain(
                     .targets
                     .push(TargetRef::Object(ability.source_id));
             }
-            sub_with_context.context = ability.context.clone();
+            apply_parent_chain_context(
+                &mut sub_with_context,
+                ability,
+                effect_context_object.as_ref(),
+            );
             resolve_ability_chain(state, &sub_with_context, events, depth + 1)?;
         } else if sub.targets.is_empty()
             && !state.last_revealed_ids.is_empty()
@@ -2292,7 +2348,11 @@ pub fn resolve_ability_chain(
                 .iter()
                 .map(|&id| TargetRef::Object(id))
                 .collect();
-            sub_with_targets.context = ability.context.clone();
+            apply_parent_chain_context(
+                &mut sub_with_targets,
+                ability,
+                effect_context_object.as_ref(),
+            );
             resolve_ability_chain(state, &sub_with_targets, events, depth + 1)?;
         } else if sub.targets.is_empty()
             && !state.last_zone_changed_ids.is_empty()
@@ -2311,23 +2371,39 @@ pub fn resolve_ability_chain(
                 .iter()
                 .map(|&id| TargetRef::Object(id))
                 .collect();
-            sub_with_targets.context = ability.context.clone();
+            apply_parent_chain_context(
+                &mut sub_with_targets,
+                ability,
+                effect_context_object.as_ref(),
+            );
             resolve_ability_chain(state, &sub_with_targets, events, depth + 1)?;
         } else if sub.targets.is_empty() && effect_uses_implicit_tracked_set_targets(&sub.effect) {
             let mut sub_with_context = sub.as_ref().clone();
-            sub_with_context.context = ability.context.clone();
+            apply_parent_chain_context(
+                &mut sub_with_context,
+                ability,
+                effect_context_object.as_ref(),
+            );
             resolve_ability_chain(state, &sub_with_context, events, depth + 1)?;
         } else if sub.targets.is_empty() && !ability.targets.is_empty() {
             let mut sub_with_targets = sub.as_ref().clone();
             sub_with_targets.targets = ability.targets.clone();
-            sub_with_targets.context = ability.context.clone();
+            apply_parent_chain_context(
+                &mut sub_with_targets,
+                ability,
+                effect_context_object.as_ref(),
+            );
             resolve_ability_chain(state, &sub_with_targets, events, depth + 1)?;
         } else {
             // Propagate SpellContext so additional_cost_paid and other flags
             // survive through the chain (e.g., Gift delivery → spell effects
             // with "if the gift was promised" conditions).
             let mut sub_with_context = sub.as_ref().clone();
-            sub_with_context.context = ability.context.clone();
+            apply_parent_chain_context(
+                &mut sub_with_context,
+                ability,
+                effect_context_object.as_ref(),
+            );
             resolve_ability_chain(state, &sub_with_context, events, depth + 1)?;
         }
     }
@@ -3247,6 +3323,78 @@ mod tests {
         assert_eq!(state.players[1].life, 18);
         // Controller drew a card
         assert_eq!(state.players[0].hand.len(), 1);
+    }
+
+    #[test]
+    fn sacrifice_effect_context_feeds_non_interactive_downstream_quantities() {
+        let mut state = GameState::new_two_player(42);
+        let victim = create_object(
+            &mut state,
+            CardId(1),
+            PlayerId(0),
+            "Four Power Creature".to_string(),
+            Zone::Battlefield,
+        );
+        {
+            let obj = state.objects.get_mut(&victim).unwrap();
+            obj.card_types.core_types.push(CoreType::Creature);
+            obj.base_card_types = obj.card_types.clone();
+            obj.power = Some(4);
+            obj.toughness = Some(4);
+            obj.base_power = Some(4);
+            obj.base_toughness = Some(4);
+        }
+        for i in 0..4 {
+            create_object(
+                &mut state,
+                CardId(10 + i),
+                PlayerId(0),
+                format!("Card {i}"),
+                Zone::Library,
+            );
+        }
+
+        let draw = ResolvedAbility::new(
+            Effect::Draw {
+                count: QuantityExpr::Ref {
+                    qty: QuantityRef::EventContextSourcePower,
+                },
+                target: TargetFilter::Controller,
+            },
+            vec![],
+            ObjectId(100),
+            PlayerId(0),
+        );
+        let gain_life = ResolvedAbility::new(
+            Effect::GainLife {
+                amount: QuantityExpr::Ref {
+                    qty: QuantityRef::EventContextSourcePower,
+                },
+                player: GainLifePlayer::Controller,
+            },
+            vec![],
+            ObjectId(100),
+            PlayerId(0),
+        )
+        .sub_ability(draw);
+        let sacrifice = ResolvedAbility::new(
+            Effect::Sacrifice {
+                target: TargetFilter::Typed(TypedFilter::creature()),
+                count: QuantityExpr::Fixed { value: 1 },
+                min_count: 0,
+            },
+            vec![],
+            ObjectId(100),
+            PlayerId(0),
+        )
+        .sub_ability(gain_life);
+        let mut events = Vec::new();
+
+        resolve_ability_chain(&mut state, &sacrifice, &mut events, 0).unwrap();
+
+        assert!(state.players[0].graveyard.contains(&victim));
+        assert_eq!(state.players[0].life, 24);
+        assert_eq!(state.players[0].hand.len(), 4);
     }
 
     fn bounce_then_draw_if_controller_matched_lki(

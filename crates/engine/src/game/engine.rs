@@ -4774,7 +4774,7 @@ mod tests {
     use crate::types::card_type::CoreType;
     use crate::types::counter::CounterType;
     use crate::types::identifiers::{CardId, ObjectId};
-    use crate::types::mana::{ManaCost, ManaCostShard};
+    use crate::types::mana::{ManaCost, ManaCostShard, ManaType, ManaUnit};
     use crate::types::TriggerMode;
 
     /// Create a simple test ability definition.
@@ -7354,6 +7354,128 @@ mod tests {
         assert!(state.players[0].graveyard.contains(&gamble));
     }
 
+    #[test]
+    fn disciple_of_bolas_uses_sacrificed_creature_power_for_life_and_draw() {
+        let mut state = setup_game_at_main_phase();
+
+        let disciple = create_object(
+            &mut state,
+            CardId(10),
+            PlayerId(0),
+            "Disciple of Bolas".to_string(),
+            Zone::Hand,
+        );
+        {
+            let obj = state.objects.get_mut(&disciple).unwrap();
+            obj.card_types.core_types.push(CoreType::Creature);
+            obj.base_card_types = obj.card_types.clone();
+            obj.power = Some(2);
+            obj.toughness = Some(1);
+            obj.base_power = Some(2);
+            obj.base_toughness = Some(1);
+            obj.mana_cost = ManaCost::Cost {
+                shards: vec![ManaCostShard::Black],
+                generic: 3,
+            };
+        }
+        apply_oracle_to_object(
+            &mut state,
+            disciple,
+            "Disciple of Bolas",
+            "When this creature enters, sacrifice another creature. You gain X life and draw X cards, where X is that creature's power.",
+        );
+
+        let hill_giant = create_object(
+            &mut state,
+            CardId(20),
+            PlayerId(0),
+            "Hill Giant".to_string(),
+            Zone::Battlefield,
+        );
+        {
+            let obj = state.objects.get_mut(&hill_giant).unwrap();
+            obj.card_types.core_types.push(CoreType::Creature);
+            obj.base_card_types = obj.card_types.clone();
+            obj.power = Some(3);
+            obj.toughness = Some(3);
+            obj.base_power = Some(3);
+            obj.base_toughness = Some(3);
+        }
+        let library_cards: Vec<_> = (0..3)
+            .map(|i| {
+                create_object(
+                    &mut state,
+                    CardId(30 + i),
+                    PlayerId(0),
+                    format!("Library Card {i}"),
+                    Zone::Library,
+                )
+            })
+            .collect();
+        assert!(library_cards
+            .iter()
+            .all(|id| state.players[0].library.contains(id)));
+
+        state.players[0].mana_pool.add(ManaUnit::new(
+            ManaType::Black,
+            ObjectId(0),
+            false,
+            Vec::new(),
+        ));
+        for _ in 0..3 {
+            state.players[0].mana_pool.add(ManaUnit::new(
+                ManaType::Colorless,
+                ObjectId(0),
+                false,
+                Vec::new(),
+            ));
+        }
+
+        let disciple_card_id = state.objects[&disciple].card_id;
+        apply_as_current(
+            &mut state,
+            GameAction::CastSpell {
+                object_id: disciple,
+                card_id: disciple_card_id,
+                targets: vec![],
+            },
+        )
+        .unwrap();
+
+        let mut result = apply_as_current(&mut state, GameAction::PassPriority).unwrap();
+        for _ in 0..6 {
+            if matches!(result.waiting_for, WaitingFor::EffectZoneChoice { .. }) {
+                break;
+            }
+            result = apply_as_current(&mut state, GameAction::PassPriority).unwrap();
+        }
+        match result.waiting_for {
+            WaitingFor::EffectZoneChoice {
+                player,
+                cards,
+                effect_kind,
+                ..
+            } => {
+                assert_eq!(player, PlayerId(0));
+                assert_eq!(effect_kind, EffectKind::Sacrifice);
+                assert!(cards.contains(&hill_giant));
+            }
+            other => panic!("expected Disciple sacrifice choice, got {other:?}"),
+        }
+
+        apply_as_current(
+            &mut state,
+            GameAction::SelectCards {
+                cards: vec![hill_giant],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(state.players[0].life, 23);
+        assert_eq!(state.players[0].hand.len(), 3);
+        assert!(state.players[0].graveyard.contains(&hill_giant));
+    }
+
     const SQUADRON_HAWK_ORACLE: &str = "Flying\nWhen this creature enters, you may search your library for up to three cards named Squadron Hawk, reveal them, put them into your hand, then shuffle.";
 
     fn add_squadron_hawk_to_library(state: &mut GameState, card_id: u64) -> ObjectId {
@@ -7677,8 +7799,6 @@ mod tests {
     // === Phase 04 Plan 03 Integration Tests ===
 
     use crate::types::ability::TargetRef;
-    use crate::types::mana::{ManaType, ManaUnit};
-
     fn add_mana(state: &mut GameState, player: PlayerId, color: ManaType, count: usize) {
         let player_data = state.players.iter_mut().find(|p| p.id == player).unwrap();
         for _ in 0..count {

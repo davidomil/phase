@@ -73,6 +73,7 @@ mod tests {
             player_scope: None,
             chosen_x: None,
             cost_paid_object: None,
+            effect_context_object: None,
             ability_index: None,
             may_trigger_origin: None,
             repeat_for: None,
