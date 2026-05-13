@@ -29965,14 +29965,14 @@ mod snapshot_tests {
 
     /// CR 611.2b + CR 703.4q: "Until end of turn, you don't lose unspent red
     /// mana as steps and phases end." (The Last Agni Kai) parses as a spell
-    /// effect that installs a turn-scoped `RetainUnspentMana` static via
-    /// `Effect::GenericEffect`. The static carries both a `mode` and an
-    /// `AddStaticMode` modification so `register_transient_effect` can
-    /// propagate the rule to the controller via `SpecificPlayer`.
+    /// effect that installs a turn-scoped `StepEndUnspentMana { Retain }`
+    /// static via `Effect::GenericEffect`. The static carries both a `mode`
+    /// and an `AddStaticMode` modification so `register_transient_effect`
+    /// can propagate the rule to the controller via `SpecificPlayer`.
     #[test]
     fn until_end_of_turn_retain_unspent_color_mana_installs_generic_effect() {
         use crate::types::ability::Duration;
-        use crate::types::mana::ManaColor;
+        use crate::types::mana::{ManaColor, StepEndManaAction};
         use crate::types::statics::StaticMode;
         let def = parse_effect_chain(
             "Until end of turn, you don't lose unspent red mana as steps and phases end.",
@@ -29990,8 +29990,9 @@ mod snapshot_tests {
         assert_eq!(static_abilities.len(), 1);
         assert_eq!(
             static_abilities[0].mode,
-            StaticMode::RetainUnspentMana {
-                color: Some(ManaColor::Red),
+            StaticMode::StepEndUnspentMana {
+                filter: Some(ManaColor::Red),
+                action: StepEndManaAction::Retain,
             }
         );
         assert_eq!(static_abilities[0].affected, Some(TargetFilter::Controller));

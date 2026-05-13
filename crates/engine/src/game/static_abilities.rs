@@ -6,7 +6,7 @@ use crate::game::layers::{evaluate_condition, evaluate_condition_with_recipient}
 use crate::types::ability::{TargetFilter, TypedFilter};
 use crate::types::game_state::GameState;
 use crate::types::identifiers::ObjectId;
-use crate::types::mana::{ManaColor, ManaType};
+use crate::types::mana::StepEndManaHandler;
 use crate::types::player::PlayerId;
 use crate::types::statics::{CostPaymentProhibition, ProhibitionScope, StaticMode};
 
@@ -578,16 +578,19 @@ pub fn player_has_cant_lose_life(state: &GameState, player_id: PlayerId) -> bool
     )
 }
 
-/// CR 106.4 + CR 500.5 + CR 703.4q: Return active static mana-retention rules
-/// applying to `player_id` as step/phase-ending mana pools empty.
+/// CR 106.4 + CR 500.5 + CR 614.1a + CR 703.4q: Return active step-end
+/// unspent-mana handlers applying to `player_id`. Unifies the retention class
+/// (Upwelling, Electro, Omnath Locus of Mana, The Last Agni Kai) and the
+/// transformation class (Horizon Stone, Kruphix, Omnath Locus of All, Ozai)
+/// since both replace the same CR 703.4q step-end empty event.
 ///
-/// Scans both printed statics on battlefield permanents (Upwelling, Electro)
-/// and transient continuous effects pinned to the player via `SpecificPlayer`
-/// (spell-installed retention from The Last Agni Kai class).
-pub fn player_retained_mana_colors(
+/// Scans printed statics on battlefield permanents and transient continuous
+/// effects pinned to the player via `SpecificPlayer` (spell-installed
+/// handlers like The Last Agni Kai's "Until end of turn, …" clause).
+pub fn player_step_end_mana_handlers(
     state: &GameState,
     player_id: PlayerId,
-) -> Vec<Option<ManaColor>> {
+) -> Vec<StepEndManaHandler> {
     use crate::types::ability::ContinuousModification;
 
     let context = StaticCheckContext {
@@ -595,9 +598,9 @@ pub fn player_retained_mana_colors(
         ..Default::default()
     };
 
-    let mut colors: Vec<Option<ManaColor>> = battlefield_active_statics(state)
+    let mut handlers: Vec<StepEndManaHandler> = battlefield_active_statics(state)
         .filter_map(|(source_obj, def)| {
-            let StaticMode::RetainUnspentMana { color } = &def.mode else {
+            let StaticMode::StepEndUnspentMana { filter, action } = &def.mode else {
                 return None;
             };
             if let Some(ref affected) = def.affected {
@@ -605,11 +608,14 @@ pub fn player_retained_mana_colors(
                     return None;
                 }
             }
-            Some(*color)
+            Some(StepEndManaHandler {
+                filter: *filter,
+                action: *action,
+            })
         })
         .collect();
 
-    // CR 611.2b: Spell-installed retention lives in `transient_continuous_effects`
+    // CR 611.2b: Spell-installed handlers live in `transient_continuous_effects`
     // with `affected: SpecificPlayer { id }` and an explicit `Duration`. Mirrors
     // the `player_has_protection_from_everything` scan pattern.
     for tce in &state.transient_continuous_effects {
@@ -631,40 +637,18 @@ pub fn player_retained_mana_colors(
         }
         for modification in &tce.modifications {
             if let ContinuousModification::AddStaticMode {
-                mode: StaticMode::RetainUnspentMana { color },
+                mode: StaticMode::StepEndUnspentMana { filter, action },
             } = modification
             {
-                colors.push(*color);
+                handlers.push(StepEndManaHandler {
+                    filter: *filter,
+                    action: *action,
+                });
             }
         }
     }
 
-    colors
-}
-
-/// CR 614.1a + CR 703.4q: Return active mana-transformation rules applying to
-/// `player_id` — "If you would lose unspent mana, that mana becomes [type]
-/// instead" (Horizon Stone / Kruphix / Omnath / Ozai). Scans printed statics
-/// on battlefield permanents only; no spell-installed equivalent ships today.
-pub fn player_transformed_mana_types(state: &GameState, player_id: PlayerId) -> Vec<ManaType> {
-    let context = StaticCheckContext {
-        player_id: Some(player_id),
-        ..Default::default()
-    };
-
-    battlefield_active_statics(state)
-        .filter_map(|(source_obj, def)| {
-            let StaticMode::TransformUnspentManaOnLoss { to } = &def.mode else {
-                return None;
-            };
-            if let Some(ref affected) = def.affected {
-                if !static_filter_matches(state, &context, affected, source_obj.id) {
-                    return None;
-                }
-            }
-            Some(*to)
-        })
-        .collect()
+    handlers
 }
 
 /// CR 118.3 + CR 119.4b + CR 601.2h + CR 602.2b: Check whether a static

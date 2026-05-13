@@ -105,28 +105,15 @@ fn enter_phase(state: &mut GameState, next: Phase, events: &mut Vec<GameEvent>) 
             | Phase::EndCombat
     );
     let entering_cleanup = next == Phase::Cleanup;
-    let retained_mana_colors: Vec<_> = state
+    let step_end_handlers: Vec<_> = state
         .players
         .iter()
-        .map(|player| super::static_abilities::player_retained_mana_colors(state, player.id))
+        .map(|player| super::static_abilities::player_step_end_mana_handlers(state, player.id))
         .collect();
-    let transformed_mana_types: Vec<_> = state
-        .players
-        .iter()
-        .map(|player| super::static_abilities::player_transformed_mana_types(state, player.id))
-        .collect();
-    for ((player, retained_by_static), transform_on_loss) in state
-        .players
-        .iter_mut()
-        .zip(retained_mana_colors.iter())
-        .zip(transformed_mana_types.iter())
-    {
-        player.mana_pool.clear_step_transition(
-            in_combat,
-            entering_cleanup,
-            retained_by_static,
-            transform_on_loss,
-        );
+    for (player, handlers) in state.players.iter_mut().zip(step_end_handlers.iter()) {
+        player
+            .mana_pool
+            .clear_step_transition(in_combat, entering_cleanup, handlers);
         // CR 121.1 + CR 504.1: `cards_drawn_this_step` resets on every step
         // transition so `ExceptFirstDrawInDrawStep` conditions can identify
         // the first card drawn during the new step (most importantly, the
@@ -1532,8 +1519,9 @@ mod tests {
             .unwrap()
             .static_definitions
             .push(
-                StaticDefinition::new(StaticMode::RetainUnspentMana {
-                    color: Some(ManaColor::Red),
+                StaticDefinition::new(StaticMode::StepEndUnspentMana {
+                    filter: Some(ManaColor::Red),
+                    action: crate::types::mana::StepEndManaAction::Retain,
                 })
                 .affected(TargetFilter::Controller),
             );
@@ -1585,8 +1573,9 @@ mod tests {
             .unwrap()
             .static_definitions
             .push(
-                StaticDefinition::new(StaticMode::RetainUnspentMana {
-                    color: Some(ManaColor::Red),
+                StaticDefinition::new(StaticMode::StepEndUnspentMana {
+                    filter: Some(ManaColor::Red),
+                    action: crate::types::mana::StepEndManaAction::Retain,
                 })
                 .affected(TargetFilter::Controller),
             );
@@ -1628,8 +1617,11 @@ mod tests {
             .unwrap()
             .static_definitions
             .push(
-                StaticDefinition::new(StaticMode::RetainUnspentMana { color: None })
-                    .affected(TargetFilter::Controller),
+                StaticDefinition::new(StaticMode::StepEndUnspentMana {
+                    filter: None,
+                    action: crate::types::mana::StepEndManaAction::Retain,
+                })
+                .affected(TargetFilter::Controller),
             );
         state.players[0].mana_pool.add(ManaUnit::new(
             ManaType::Red,
@@ -1678,8 +1670,9 @@ mod tests {
             .unwrap()
             .static_definitions
             .push(
-                StaticDefinition::new(StaticMode::TransformUnspentManaOnLoss {
-                    to: ManaType::Colorless,
+                StaticDefinition::new(StaticMode::StepEndUnspentMana {
+                    filter: None,
+                    action: crate::types::mana::StepEndManaAction::Transform(ManaType::Colorless),
                 })
                 .affected(TargetFilter::Controller),
             );
@@ -1720,7 +1713,7 @@ mod tests {
         // CR 611.2b + CR 703.4q: The Last Agni Kai shape — a spell installs a
         // turn-scoped retention rule via `add_transient_continuous_effect` with
         // `affected: SpecificPlayer { controller }` and modifications carrying
-        // `AddStaticMode { RetainUnspentMana }`. The runtime query must see it.
+        // `AddStaticMode { StepEndUnspentMana { action: Retain } }`. The runtime query must see it.
         // RUNTIME test: drives `advance_phase` through the live pipeline.
         use crate::types::ability::{ContinuousModification, Duration, TargetFilter};
         use crate::types::mana::{ManaColor, ManaType, ManaUnit};
@@ -1742,8 +1735,9 @@ mod tests {
             Duration::UntilEndOfTurn,
             TargetFilter::SpecificPlayer { id: PlayerId(0) },
             vec![ContinuousModification::AddStaticMode {
-                mode: StaticMode::RetainUnspentMana {
-                    color: Some(ManaColor::Red),
+                mode: StaticMode::StepEndUnspentMana {
+                    filter: Some(ManaColor::Red),
+                    action: crate::types::mana::StepEndManaAction::Retain,
                 },
             }],
             None,
@@ -1793,8 +1787,11 @@ mod tests {
             .unwrap()
             .static_definitions
             .push(
-                StaticDefinition::new(StaticMode::RetainUnspentMana { color: None })
-                    .affected(TargetFilter::Player),
+                StaticDefinition::new(StaticMode::StepEndUnspentMana {
+                    filter: None,
+                    action: crate::types::mana::StepEndManaAction::Retain,
+                })
+                .affected(TargetFilter::Player),
             );
 
         state.players[0].mana_pool.add(ManaUnit::new(

@@ -52,8 +52,7 @@ fn is_data_carrying_static(mode: &StaticMode) -> bool {
             | StaticMode::CastWithKeyword { .. }
             | StaticMode::ActivateAsInstant { .. }
             | StaticMode::MaximumHandSize { .. }
-            | StaticMode::RetainUnspentMana { .. }
-            | StaticMode::TransformUnspentManaOnLoss { .. }
+            | StaticMode::StepEndUnspentMana { .. }
             | StaticMode::CantBeBlockedBy { .. }
             // CR 602.5 + CR 603.2a: CantBeActivated carries `who` + `source_filter`.
             | StaticMode::CantBeActivated { .. }
@@ -6130,14 +6129,16 @@ fn audit_card_lines(oracle_text: &str, face: &CardFace) -> Vec<SemanticFinding> 
                 effective_lower.contains("can't be blocked")
             }
             StaticMode::CantBeBlockedBy { .. } => effective_lower.contains("can't be blocked"),
-            StaticMode::RetainUnspentMana { .. } => {
-                effective_lower.contains("don't lose unspent")
-                    && effective_lower.contains("mana as steps and phases end")
-            }
-            StaticMode::TransformUnspentManaOnLoss { .. } => {
-                effective_lower.contains("would lose unspent mana")
-                    && effective_lower.contains("becomes")
-            }
+            StaticMode::StepEndUnspentMana { action, .. } => match action {
+                crate::types::mana::StepEndManaAction::Retain => {
+                    effective_lower.contains("don't lose unspent")
+                        && effective_lower.contains("mana as steps and phases end")
+                }
+                crate::types::mana::StepEndManaAction::Transform(_) => {
+                    effective_lower.contains("would lose unspent mana")
+                        && effective_lower.contains("becomes")
+                }
+            },
             StaticMode::CanAttackWithDefender => {
                 effective_lower.contains("as though it didn't have defender")
             }

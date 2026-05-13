@@ -72,12 +72,14 @@ fn nom_tag_tp<'a>(tp: &TextPair<'a>, prefix: &str) -> Option<TextPair<'a>> {
 
 /// CR 614.1a + CR 703.4q: Parse "If you would lose unspent mana, that mana
 /// becomes [type] instead." — Horizon Stone / Kruphix / Omnath / Ozai class.
-/// Emits a printed `StaticMode::TransformUnspentManaOnLoss` bound to the
-/// source's controller.
+/// Emits the unified `StepEndUnspentMana { filter: None, action: Transform(to) }`
+/// bound to the source's controller.
 pub(crate) fn try_parse_transform_unspent_mana_static(
     text: &str,
     lower: &str,
 ) -> Option<StaticDefinition> {
+    use crate::types::mana::StepEndManaAction;
+
     nom_on_lower(text, lower, |input| {
         let (input, _) =
             tag::<_, _, OracleError<'_>>("if you would lose unspent mana, that mana becomes ")
@@ -93,11 +95,13 @@ pub(crate) fn try_parse_transform_unspent_mana_static(
         Ok((input, to))
     })
     .map(|(to, _)| {
-        StaticDefinition::new(StaticMode::TransformUnspentManaOnLoss { to })
+        let mode = StaticMode::StepEndUnspentMana {
+            filter: None,
+            action: StepEndManaAction::Transform(to),
+        };
+        StaticDefinition::new(mode.clone())
             .affected(TargetFilter::Controller)
-            .modifications(vec![ContinuousModification::AddStaticMode {
-                mode: StaticMode::TransformUnspentManaOnLoss { to },
-            }])
+            .modifications(vec![ContinuousModification::AddStaticMode { mode }])
             .description(text.to_string())
     })
 }
@@ -106,6 +110,8 @@ pub(crate) fn try_parse_retain_unspent_mana_static(
     text: &str,
     lower: &str,
 ) -> Option<StaticDefinition> {
+    use crate::types::mana::StepEndManaAction;
+
     nom_on_lower(text, lower, |input| {
         // CR 703.4q: Subject parameterizes the affected scope.
         // "You" → controller (Electro); "Players" → every player (Upwelling).
@@ -141,11 +147,13 @@ pub(crate) fn try_parse_retain_unspent_mana_static(
         // `register_transient_effect` → `add_transient_continuous_effect`.
         // Printed-static callers (Upwelling, Electro) reach this via the
         // source's `static_definitions` scan and ignore `modifications`.
-        StaticDefinition::new(StaticMode::RetainUnspentMana { color })
+        let mode = StaticMode::StepEndUnspentMana {
+            filter: color,
+            action: StepEndManaAction::Retain,
+        };
+        StaticDefinition::new(mode.clone())
             .affected(affected)
-            .modifications(vec![ContinuousModification::AddStaticMode {
-                mode: StaticMode::RetainUnspentMana { color },
-            }])
+            .modifications(vec![ContinuousModification::AddStaticMode { mode }])
             .description(text.to_string())
     })
 }
@@ -16402,13 +16410,15 @@ mod tests {
 
     #[test]
     fn static_retain_unspent_colored_mana_across_steps_and_phases() {
+        use crate::types::mana::StepEndManaAction;
         let def =
             parse_static_line("You don't lose unspent red mana as steps and phases end.").unwrap();
 
         assert_eq!(
             def.mode,
-            StaticMode::RetainUnspentMana {
-                color: Some(ManaColor::Red),
+            StaticMode::StepEndUnspentMana {
+                filter: Some(ManaColor::Red),
+                action: StepEndManaAction::Retain,
             }
         );
         assert_eq!(def.affected, Some(TargetFilter::Controller));
@@ -16416,22 +16426,31 @@ mod tests {
 
     #[test]
     fn static_retain_all_unspent_mana_across_steps_and_phases() {
+        use crate::types::mana::StepEndManaAction;
         let def =
             parse_static_line("You don't lose unspent mana as steps and phases end.").unwrap();
 
-        assert_eq!(def.mode, StaticMode::RetainUnspentMana { color: None });
+        assert_eq!(
+            def.mode,
+            StaticMode::StepEndUnspentMana {
+                filter: None,
+                action: StepEndManaAction::Retain,
+            }
+        );
         assert_eq!(def.affected, Some(TargetFilter::Controller));
     }
 
     #[test]
     fn static_retain_unspent_mana_accepts_curly_apostrophe() {
+        use crate::types::mana::StepEndManaAction;
         let def = parse_static_line("You don’t lose unspent green mana as steps and phases end.")
             .unwrap();
 
         assert_eq!(
             def.mode,
-            StaticMode::RetainUnspentMana {
-                color: Some(ManaColor::Green),
+            StaticMode::StepEndUnspentMana {
+                filter: Some(ManaColor::Green),
+                action: StepEndManaAction::Retain,
             }
         );
     }
@@ -16440,16 +16459,24 @@ mod tests {
     fn static_retain_unspent_mana_players_subject() {
         // CR 703.4q: Upwelling — "Players don't lose unspent mana as steps and
         // phases end." Affected scope widens from controller to every player.
+        use crate::types::mana::StepEndManaAction;
         let def =
             parse_static_line("Players don't lose unspent mana as steps and phases end.").unwrap();
 
-        assert_eq!(def.mode, StaticMode::RetainUnspentMana { color: None });
+        assert_eq!(
+            def.mode,
+            StaticMode::StepEndUnspentMana {
+                filter: None,
+                action: StepEndManaAction::Retain,
+            }
+        );
         assert_eq!(def.affected, Some(TargetFilter::Player));
     }
 
     #[test]
     fn static_transform_unspent_mana_colorless() {
         // CR 614.1a + CR 703.4q: Horizon Stone / Kruphix.
+        use crate::types::mana::{ManaType, StepEndManaAction};
         let def = parse_static_line(
             "If you would lose unspent mana, that mana becomes colorless instead.",
         )
@@ -16457,8 +16484,9 @@ mod tests {
 
         assert_eq!(
             def.mode,
-            StaticMode::TransformUnspentManaOnLoss {
-                to: crate::types::mana::ManaType::Colorless,
+            StaticMode::StepEndUnspentMana {
+                filter: None,
+                action: StepEndManaAction::Transform(ManaType::Colorless),
             }
         );
         assert_eq!(def.affected, Some(TargetFilter::Controller));
@@ -16466,15 +16494,16 @@ mod tests {
 
     #[test]
     fn static_transform_unspent_mana_to_color() {
-        use crate::types::mana::ManaType;
+        use crate::types::mana::{ManaType, StepEndManaAction};
         // CR 614.1a + CR 703.4q: Omnath, Locus of All (Black) and Ozai (Red).
         let black =
             parse_static_line("If you would lose unspent mana, that mana becomes black instead.")
                 .unwrap();
         assert_eq!(
             black.mode,
-            StaticMode::TransformUnspentManaOnLoss {
-                to: ManaType::Black,
+            StaticMode::StepEndUnspentMana {
+                filter: None,
+                action: StepEndManaAction::Transform(ManaType::Black),
             }
         );
 
@@ -16483,7 +16512,10 @@ mod tests {
                 .unwrap();
         assert_eq!(
             red.mode,
-            StaticMode::TransformUnspentManaOnLoss { to: ManaType::Red }
+            StaticMode::StepEndUnspentMana {
+                filter: None,
+                action: StepEndManaAction::Transform(ManaType::Red),
+            }
         );
     }
 

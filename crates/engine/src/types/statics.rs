@@ -8,7 +8,7 @@ use super::ability::{
     AbilityCost, CardPlayMode, CostCategory, QuantityExpr, QuantityRef, TargetFilter,
 };
 use super::keywords::Keyword;
-use super::mana::{ManaColor, ManaCost, ManaType};
+use super::mana::{ManaColor, ManaCost, StepEndManaAction};
 use super::phase::Phase;
 use super::zones::Zone;
 
@@ -726,26 +726,20 @@ pub enum StaticMode {
     /// CR 609.4b: "You may spend mana as though it were mana of any color."
     /// Allows the controller to pay colored mana costs with mana of any color.
     SpendManaAsAnyColor,
-    /// CR 106.4 + CR 500.5 + CR 703.4q: The affected player does not lose
-    /// matching unspent mana as steps and phases end. `None` means all mana,
-    /// including colorless; `Some(color)` means only that color.
-    RetainUnspentMana {
-        color: Option<ManaColor>,
-    },
-    /// CR 614.1a + CR 703.4q: "If you would lose unspent mana, that mana
-    /// becomes [type] instead." The affected player's about-to-be-emptied
-    /// unspent mana is recolored to `to` rather than removed.
+    /// CR 106.4 + CR 500.5 + CR 703.4q + CR 614.1a: How the affected player's
+    /// unspent mana is handled as steps and phases end. `filter` selects which
+    /// mana the rule applies to (`None` = every color including colorless;
+    /// `Some(color)` = only matching units); `action` is what happens to a
+    /// matching unit at the would-be-empty event.
     ///
-    /// Implemented inline alongside `RetainUnspentMana` rather than through
-    /// the replacement pipeline because there is no existing `LoseMana` event
-    /// machinery and 4 cards do not justify lifting an entire new event class.
-    /// **Refactor trigger:** if a third step-end unspent-mana variant lands
-    /// (e.g., "Whenever you lose unspent mana, ..." or a different rewrite),
-    /// parameterize this and `RetainUnspentMana` under a single
-    /// `StepEndUnspentMana { color_filter, action }` umbrella per the
-    /// sibling-cluster smell rule.
-    TransformUnspentManaOnLoss {
-        to: ManaType,
+    /// Unified across the retention family (Upwelling, Electro, Omnath Locus
+    /// of Mana, The Last Agni Kai) and the transformation family (Horizon
+    /// Stone, Kruphix, Omnath Locus of All, Ozai) per the parameterization
+    /// rule — both differ only on what happens at the CR 703.4q event, not on
+    /// which event they react to.
+    StepEndUnspentMana {
+        filter: Option<ManaColor>,
+        action: StepEndManaAction,
     },
     /// CR 702.3b: Allows creatures with defender to attack despite having the keyword.
     /// "can attack as though it didn't have defender" overrides the defender restriction.
@@ -797,8 +791,10 @@ impl Hash for StaticMode {
             StaticMode::CantBeBlockedExceptBy { filter } => filter.hash(state),
             StaticMode::CantBeBlockedBy { .. } => {} // TargetFilter does not implement Hash; discriminant only
             StaticMode::AdditionalLandDrop { count } => count.hash(state),
-            StaticMode::RetainUnspentMana { color } => color.hash(state),
-            StaticMode::TransformUnspentManaOnLoss { to } => to.hash(state),
+            StaticMode::StepEndUnspentMana { filter, action } => {
+                filter.hash(state);
+                action.hash(state);
+            }
             StaticMode::Other(s) => s.hash(state),
             StaticMode::GraveyardCastPermission {
                 frequency,
@@ -991,11 +987,8 @@ impl fmt::Display for StaticMode {
             }
             StaticMode::SkipStep { step } => write!(f, "SkipStep({step:?})"),
             StaticMode::SpendManaAsAnyColor => write!(f, "SpendManaAsAnyColor"),
-            StaticMode::RetainUnspentMana { color } => {
-                write!(f, "RetainUnspentMana({color:?})")
-            }
-            StaticMode::TransformUnspentManaOnLoss { to } => {
-                write!(f, "TransformUnspentManaOnLoss({to:?})")
+            StaticMode::StepEndUnspentMana { filter, action } => {
+                write!(f, "StepEndUnspentMana({filter:?},{action})")
             }
             StaticMode::CanAttackWithDefender => write!(f, "CanAttackWithDefender"),
             StaticMode::AssignNoCombatDamage => write!(f, "AssignNoCombatDamage"),
@@ -1219,8 +1212,7 @@ impl FromStr for StaticMode {
             "CantWinTheGame" => StaticMode::CantWinTheGame,
             "CantLoseTheGame" => StaticMode::CantLoseTheGame,
             "CanAttackWithDefender" => StaticMode::CanAttackWithDefender,
-            s if s.starts_with("RetainUnspentMana(") => StaticMode::Other(s.to_string()),
-            s if s.starts_with("TransformUnspentManaOnLoss(") => StaticMode::Other(s.to_string()),
+            s if s.starts_with("StepEndUnspentMana(") => StaticMode::Other(s.to_string()),
             "UntapsDuringEachOtherPlayersUntapStep" => {
                 StaticMode::UntapsDuringEachOtherPlayersUntapStep
             }
