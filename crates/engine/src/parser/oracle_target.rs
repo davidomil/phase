@@ -198,12 +198,35 @@ pub fn parse_target_with_ctx<'a>(text: &'a str, ctx: &mut ParseContext) -> (Targ
             .trim_end_matches('.')
             .trim_end_matches(',')
             .trim_end();
-        // allow-noncombinator: TextPair::strip_suffix is the dual-string structural API for postnominal qualifier stripping (PATTERNS.md §9).
-        if let Some(prefix) = trimmed.strip_suffix(" chosen at random") {
+        for suffix in [" chosen at random", " at random"] {
+            // allow-noncombinator: TextPair::strip_suffix is the dual-string structural API for postnominal qualifier stripping (PATTERNS.md §9).
+            if let Some(prefix) = trimmed.strip_suffix(suffix) {
+                ctx.target_selection_mode = TargetSelectionMode::Random;
+                let (filter, _) = parse_target_with_ctx(prefix.original, ctx);
+                let filter = use_owner_for_random_non_battlefield_zone(filter);
+                // Return empty remainder — the entire input has been consumed
+                // (prefix + stripped suffix + any trailing punctuation).
+                return (filter, &text[text.len()..]);
+            }
+        }
+    }
+    if let Ok((_, (before_random, after_random))) =
+        nom_primitives::split_once_on(lower.as_str(), " at random ")
+    {
+        if alt((
+            tag::<_, _, OracleError<'_>>("from "),
+            tag("in "),
+            tag("on "),
+        ))
+        .parse(after_random)
+        .is_ok()
+        {
             ctx.target_selection_mode = TargetSelectionMode::Random;
-            let (filter, _) = parse_target_with_ctx(prefix.original, ctx);
-            // Return empty remainder — the entire input has been consumed
-            // (prefix + stripped suffix + any trailing punctuation).
+            let before_original = &text[..before_random.len()];
+            let after_original = &text[lower.len() - after_random.len()..];
+            let rewritten = format!("{before_original} {after_original}");
+            let (filter, _) = parse_target_with_ctx(&rewritten, ctx);
+            let filter = use_owner_for_random_non_battlefield_zone(filter);
             return (filter, &text[text.len()..]);
         }
     }
@@ -1048,6 +1071,28 @@ pub fn parse_target_with_ctx<'a>(text: &'a str, ctx: &mut ParseContext) -> (Targ
             line_index: 0,
         });
         (TargetFilter::Any, text)
+    }
+}
+
+fn use_owner_for_random_non_battlefield_zone(filter: TargetFilter) -> TargetFilter {
+    match filter {
+        TargetFilter::Typed(mut typed)
+            if typed.controller == Some(ControllerRef::You)
+                && typed.properties.iter().any(|prop| {
+                    matches!(prop, FilterProp::InZone { zone } if *zone != Zone::Battlefield)
+                })
+                && !typed
+                    .properties
+                    .iter()
+                    .any(|prop| matches!(prop, FilterProp::Owned { .. })) =>
+        {
+            typed.controller = None;
+            typed.properties.push(FilterProp::Owned {
+                controller: ControllerRef::You,
+            });
+            TargetFilter::Typed(typed)
+        }
+        other => other,
     }
 }
 
@@ -4133,6 +4178,35 @@ mod tests {
             TargetFilter::Typed(TypedFilter::default().controller(ControllerRef::Opponent))
         );
         assert_eq!(ctx.target_selection_mode, TargetSelectionMode::Random);
+    }
+
+    #[test]
+    fn graveyard_card_at_random_marks_random_mode() {
+        for text in [
+            "a card from your graveyard at random",
+            "a card at random from your graveyard",
+        ] {
+            let mut ctx = ParseContext::default();
+            let (filter, rest) = parse_target_with_ctx(text, &mut ctx);
+            assert_eq!(rest, "");
+            assert_eq!(ctx.target_selection_mode, TargetSelectionMode::Random);
+
+            let TargetFilter::Typed(typed) = filter else {
+                panic!("expected typed card filter for {text}");
+            };
+            assert!(typed.type_filters.contains(&TypeFilter::Card));
+            assert_eq!(typed.controller, None);
+            assert!(typed.properties.contains(&FilterProp::Owned {
+                controller: ControllerRef::You
+            }));
+            assert!(
+                typed.properties.contains(&FilterProp::InZone {
+                    zone: Zone::Graveyard
+                }),
+                "expected graveyard zone property for {text}, got {:?}",
+                typed.properties
+            );
+        }
     }
 
     #[test]

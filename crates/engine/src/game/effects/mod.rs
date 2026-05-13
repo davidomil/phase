@@ -6804,6 +6804,64 @@ mod tests {
         }
     }
 
+    #[test]
+    fn random_graveyard_exile_chain_grants_play_from_exile_permission() {
+        let mut state = GameState::new_two_player(42);
+        let source = create_object(
+            &mut state,
+            crate::types::identifiers::CardId(100),
+            PlayerId(0),
+            "Advanced Reconstruction".to_string(),
+            Zone::Battlefield,
+        );
+        let grave_card = create_object(
+            &mut state,
+            crate::types::identifiers::CardId(1),
+            PlayerId(0),
+            "Previously Stolen Card".to_string(),
+            Zone::Graveyard,
+        );
+        state.objects.get_mut(&grave_card).unwrap().controller = PlayerId(1);
+
+        let def = crate::parser::oracle_effect::parse_effect_chain(
+            "Mill a card, then exile a card from your graveyard at random. You may play the exiled card this turn.",
+            AbilityKind::Spell,
+        );
+        let resolved =
+            crate::game::ability_utils::build_resolved_from_def(&def, source, PlayerId(0));
+        let mut events = Vec::new();
+        resolve_ability_chain(&mut state, &resolved, &mut events, 0).unwrap();
+
+        assert!(
+            !matches!(state.waiting_for, WaitingFor::TargetSelection { .. }),
+            "random graveyard exile must not prompt for target selection"
+        );
+        assert!(
+            !matches!(state.waiting_for, WaitingFor::EffectZoneChoice { .. }),
+            "random graveyard exile must not prompt for a zone choice"
+        );
+        assert!(
+            !matches!(state.waiting_for, WaitingFor::OptionalEffectChoice { .. }),
+            "play-from-exile permission must be granted without an optional-effect prompt"
+        );
+
+        assert_eq!(state.objects[&grave_card].zone, Zone::Exile);
+
+        let permissions = &state.objects[&grave_card].casting_permissions;
+        assert!(
+            permissions.iter().any(|permission| matches!(
+                permission,
+                CastingPermission::PlayFromExile {
+                    duration: Duration::UntilEndOfTurn,
+                    granted_to: PlayerId(0),
+                    ..
+                }
+            )),
+            "randomly exiled card should get PlayFromExile for player 0, got {:?}",
+            permissions
+        );
+    }
+
     // CR 603.4: Runtime tests for `AbilityCondition::NthResolutionThisTurn`.
 
     /// Build a minimal `ResolvedAbility` with a stamped `ability_index` for

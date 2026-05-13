@@ -2090,6 +2090,22 @@ fn parse_effect_clause(text: &str, ctx: &mut ParseContext) -> ParsedEffectClause
         }
         return clause;
     }
+    let original_lower = text.to_lowercase();
+    if scan_contains_phrase(&original_lower, "this turn")
+        || scan_contains_phrase(&original_lower, "until ")
+    {
+        if let Some(mut clause) = try_parse_play_from_exile(TextPair::new(text, &original_lower)) {
+            if !matches!(clause.effect, Effect::GrantCastingPermission { .. }) {
+                peel_ctx.apply_optional(&mut clause.optional);
+            }
+            if clause.condition.is_none() {
+                if let Some(cond) = peel_ctx.condition().cloned() {
+                    clause.condition = Some(cond);
+                }
+            }
+            return clause;
+        }
+    }
     let mut clause = parse_effect_clause_inner(&peeled_text, ctx);
     // Trial-parse fallback: peeling may have removed disambiguation signal
     // a specialized parser depends on (e.g., `the next spell you cast this
@@ -3975,6 +3991,10 @@ fn try_parse_play_from_exile(tp: TextPair) -> Option<ParsedEffectClause> {
         return Some(clause);
     }
 
+    if let Some(clause) = try_parse_play_the_exiled_card_grant(tp) {
+        return Some(clause);
+    }
+
     // Try full forms first: "you may play/cast that card/it/those cards ..."
     // Then bare forms (after "you may" has been stripped): "play that card ..."
     let full_rest = nom_on_lower(tp.original, tp.lower, |input| {
@@ -4040,6 +4060,37 @@ fn try_parse_play_from_exile(tp: TextPair) -> Option<ParsedEffectClause> {
             mana_spend_permission: None,
         },
         target: TargetFilter::Any,
+        grantee: Default::default(),
+    }))
+}
+
+fn try_parse_play_the_exiled_card_grant(tp: TextPair) -> Option<ParsedEffectClause> {
+    let (duration, rest_orig) = nom_on_lower(tp.original, tp.lower, |input| {
+        let (input, _) = opt(alt((tag("you may "), tag("may ")))).parse(input)?;
+        let (input, _) = alt((tag("play "), tag("cast "))).parse(input)?;
+        let (input, _) = tag("the exiled card").parse(input)?;
+        let (input, duration) = alt((
+            value(Duration::UntilEndOfTurn, tag(" this turn")),
+            value(Duration::UntilEndOfTurn, tag(" until end of turn")),
+            value(Duration::UntilEndOfTurn, tag(" until the end of turn")),
+        ))
+        .parse(input)?;
+        Ok((input, duration))
+    })?;
+    if !rest_orig.trim().is_empty() {
+        return None;
+    }
+
+    Some(parsed_clause(Effect::GrantCastingPermission {
+        permission: CastingPermission::PlayFromExile {
+            duration,
+            granted_to: crate::types::player::PlayerId(0),
+            frequency: CastFrequency::Unlimited,
+            source_id: None,
+            exiled_by_ability_controller: None,
+            mana_spend_permission: None,
+        },
+        target: tracked_set_filter(),
         grantee: Default::default(),
     }))
 }
@@ -7870,6 +7921,13 @@ fn parse_imperative_effect_inner(tp: TextPair, ctx: &mut ParseContext) -> Parsed
         return parsed_clause(effect);
     }
 
+    // Duration-scoped "play the exiled card" grants permission to the object
+    // just exiled by the preceding clause. It is not an immediate cast/play
+    // instruction, so it must win before the generic CastFromZone parser.
+    if let Some(clause) = try_parse_play_from_exile(tp) {
+        return clause;
+    }
+
     // CR 601.2a + CR 118.9: "cast it/that card without paying its mana cost"
     if let Some(effect) = try_parse_cast_effect(tp.lower) {
         return parsed_clause(effect);
@@ -10590,12 +10648,21 @@ pub(crate) fn lower_effect_chain_ir(ir: &EffectChainIr) -> AbilityDefinition {
 
         if clause_ir.is_optional
             && !matches!(&clause_ir.parsed.effect, Effect::SearchOutsideGame { .. })
+            && !matches!(
+                &clause_ir.parsed.effect,
+                Effect::GrantCastingPermission { .. }
+            )
         {
             def.optional = true;
             def.optional_for = clause_ir.opponent_may_scope;
         }
         // CR 117.3a + CR 608.2c: Propagate subject-phrase "may" modal.
-        if clause_ir.parsed.optional {
+        if clause_ir.parsed.optional
+            && !matches!(
+                &clause_ir.parsed.effect,
+                Effect::GrantCastingPermission { .. }
+            )
+        {
             def.optional = true;
         }
         if matches!(&clause_ir.parsed.effect, Effect::SearchOutsideGame { .. }) {
@@ -20349,6 +20416,89 @@ mod tests {
                     duration: Duration::UntilEndOfTurn,
                     ..
                 },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_play_the_exiled_card_this_turn_targets_tracked_set() {
+        let def = parse_effect_chain(
+            "You may play the exiled card this turn.",
+            AbilityKind::Spell,
+        );
+        let Effect::GrantCastingPermission {
+            permission, target, ..
+        } = def.effect.as_ref()
+        else {
+            panic!("expected GrantCastingPermission, got {:?}", def.effect);
+        };
+        assert_eq!(
+            *target,
+            TargetFilter::TrackedSet {
+                id: TrackedSetId(0)
+            }
+        );
+        assert!(matches!(
+            permission,
+            CastingPermission::PlayFromExile {
+                duration: Duration::UntilEndOfTurn,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn advanced_reconstruction_body_uses_random_exile_and_tracked_permission() {
+        let def = parse_effect_chain(
+            "Mill a card, then exile a card from your graveyard at random. You may play the exiled card this turn.",
+            AbilityKind::Spell,
+        );
+        assert!(matches!(def.effect.as_ref(), Effect::Mill { .. }));
+
+        let exile = def.sub_ability.as_deref().expect("exile sub-ability");
+        let Effect::ChangeZone {
+            origin,
+            destination,
+            target,
+            ..
+        } = exile.effect.as_ref()
+        else {
+            panic!("expected ChangeZone, got {:?}", exile.effect);
+        };
+        assert_eq!(*origin, Some(Zone::Graveyard));
+        assert_eq!(*destination, Zone::Exile);
+        assert_eq!(exile.target_selection_mode, TargetSelectionMode::Random);
+        assert!(matches!(
+            target,
+            TargetFilter::Typed(TypedFilter {
+                controller: None,
+                properties,
+                ..
+            }) if properties.contains(&FilterProp::Owned { controller: ControllerRef::You })
+                && properties.contains(&FilterProp::InZone { zone: Zone::Graveyard })
+        ));
+
+        let grant = exile
+            .sub_ability
+            .as_deref()
+            .expect("permission sub-ability");
+        let Effect::GrantCastingPermission {
+            permission, target, ..
+        } = grant.effect.as_ref()
+        else {
+            panic!("expected GrantCastingPermission, got {:?}", grant.effect);
+        };
+        assert_eq!(
+            *target,
+            TargetFilter::TrackedSet {
+                id: TrackedSetId(0)
+            }
+        );
+        assert!(matches!(
+            permission,
+            CastingPermission::PlayFromExile {
+                duration: Duration::UntilEndOfTurn,
                 ..
             }
         ));
