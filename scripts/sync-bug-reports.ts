@@ -57,12 +57,14 @@ const SYNC_STATE_PATH = "triage/sync-state.json";
 const MESSAGES_PATH = "triage/raw/discord-messages.jsonl";
 const REPORT_ITEMS_PATH = "triage/report-items.jsonl";
 const TRIAGE_ITEMS_PATH = "triage/triage-items.jsonl";
+const TRIAGE_DELTA_PATH = "triage/triage-delta.jsonl";
 const DASHBOARD_PATH = "triage/dashboard.md";
 const LEGACY_EXPORT_PATH = "tmp/discord-thread-messages.json";
 
 function defaultSyncState(): SyncState {
   return {
     last_fetch_at: new Date(0).toISOString(),
+    prev_fetch_at: new Date(0).toISOString(),
     last_thread_cursors: {},
     imported_from_legacy: false,
     published_threads: {},
@@ -279,6 +281,76 @@ async function fetchIncremental(
 }
 
 // ---------------------------------------------------------------------------
+// Fetch-window delta
+// ---------------------------------------------------------------------------
+
+const EPOCH = new Date(0).toISOString();
+
+/** Message ids belonging to the most recent fetch window.
+ *
+ *  Steady state: every message with `fetched_at > prev_fetch_at`. Each `fetch`
+ *  run stamps all of its new messages with one `fetched_at` and rolls
+ *  `prev_fetch_at` forward, so this is exactly the last run's batch.
+ *
+ *  Migration fallback (no `prev_fetch_at`, or epoch): the single most recent
+ *  `fetched_at` value identifies the last batch on its own. */
+function latestFetchMessageIds(
+  messages: RawDiscordMessage[],
+  prevFetchAt: string | undefined,
+): Set<string> {
+  if (messages.length === 0) return new Set();
+  if (prevFetchAt !== undefined && prevFetchAt !== EPOCH) {
+    return new Set(
+      messages.filter((m) => m.fetched_at > prevFetchAt).map((m) => m.message_id),
+    );
+  }
+  const maxFetchedAt = messages.reduce(
+    (max, m) => (m.fetched_at > max ? m.fetched_at : max),
+    "",
+  );
+  return new Set(
+    messages.filter((m) => m.fetched_at === maxFetchedAt).map((m) => m.message_id),
+  );
+}
+
+/** Emit triage/triage-delta.jsonl — the triage items from the latest fetch
+ *  window only. This is the slice a reviewer reads each cycle; it never grows
+ *  with the archive. Surfaces ORPHANS: items the heuristic tagged
+ *  `append_to_existing` (or `needs_human_review`) but with no `github_issue` —
+ *  a contradiction meaning an unfiled report, which is the failure mode behind
+ *  silently-missed bugs. */
+async function writeTriageDelta(items: TriageItem[]): Promise<void> {
+  const messages = readJsonl<RawDiscordMessage>(MESSAGES_PATH);
+  const state = await loadSyncState();
+  const deltaIds = latestFetchMessageIds(messages, state.prev_fetch_at);
+  const delta = items.filter((it) => deltaIds.has(it.message_id));
+  await writeJsonl(TRIAGE_DELTA_PATH, delta);
+
+  const orphans = delta.filter(
+    (it) =>
+      it.github_issue === undefined &&
+      (it.classification === "primary_report" ||
+        it.classification === "additional_report") &&
+      it.proposed_action !== "skip" &&
+      it.proposed_action !== "skip_existing_closed",
+  );
+  const byAction = new Map<string, number>();
+  for (const it of delta) {
+    byAction.set(it.proposed_action, (byAction.get(it.proposed_action) ?? 0) + 1);
+  }
+
+  console.log(`  ---`);
+  console.log(`  Delta (new since last fetch): ${delta.length} items → ${TRIAGE_DELTA_PATH}`);
+  for (const action of [...byAction.keys()].sort()) {
+    console.log(`    ${action}: ${byAction.get(action)}`);
+  }
+  console.log(`  Unfiled reports in delta (REVIEW THESE — incl. orphans): ${orphans.length}`);
+  for (const o of orphans) {
+    console.log(`    - ${o.thread_name}  [${o.classification} / ${o.proposed_action}]`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Subcommands
 // ---------------------------------------------------------------------------
 
@@ -316,6 +388,9 @@ async function cmdFetch(): Promise<void> {
   );
 
   state.last_thread_cursors = cursors;
+  // Roll the delta watermark forward: the run that just completed becomes the
+  // "previous" boundary, so the NEXT triage emits exactly this run's messages.
+  state.prev_fetch_at = state.last_fetch_at;
   state.last_fetch_at = new Date().toISOString();
   await saveSyncState(state);
 
@@ -415,6 +490,22 @@ async function cmdTriage(): Promise<void> {
     `no_card: ${byParserStatus.get("no_card") ?? 0}`,
   );
   console.log(`  Written to ${TRIAGE_ITEMS_PATH}`);
+
+  await writeTriageDelta(items);
+}
+
+async function cmdDelta(): Promise<void> {
+  // Re-emit triage/triage-delta.jsonl from the existing triage-items.jsonl
+  // without re-running classification. Useful to inspect the latest fetch
+  // window's new reports on demand.
+  const items = readJsonl<TriageItem>(TRIAGE_ITEMS_PATH);
+  if (items.length === 0) {
+    console.error(`No triage items at ${TRIAGE_ITEMS_PATH}. Run 'triage' first.`);
+    process.exit(1);
+  }
+  await mkdir("triage", { recursive: true });
+  console.log(`Computing fetch-window delta from ${items.length} triage items...`);
+  await writeTriageDelta(items);
 }
 
 interface GithubIssueIndexItem {
@@ -1147,6 +1238,12 @@ Commands:
   fetch     Fetch Discord messages → triage/raw/discord-messages.jsonl
   extract   Extract report items from messages → triage/report-items.jsonl
   triage    Classify report items → triage/triage-items.jsonl
+            Also emits triage/triage-delta.jsonl: ONLY the reports from the
+            latest fetch window (messages with fetched_at > prev_fetch_at).
+            Review the delta — never the full archive — each cycle.
+  delta     Re-emit triage/triage-delta.jsonl from existing triage-items.jsonl
+            without re-classifying. Flags orphans (append_to_existing /
+            needs_human_review with no github_issue = unfiled report).
   pending   List unpublished threads (local-state diff of cursors vs
             published_threads), newest-activity-first. NO judgment applied —
             the operator (an LLM in chat) reads candidates and decides.
@@ -1187,6 +1284,9 @@ switch (command) {
     break;
   case "triage":
     await cmdTriage();
+    break;
+  case "delta":
+    await cmdDelta();
     break;
   case "publish":
     await cmdPublish();
