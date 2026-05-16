@@ -5369,6 +5369,19 @@ fn lower_imperative_family_effect(ast: ImperativeFamilyAst) -> Effect {
     }
 }
 
+/// CR 122.1: Detect a *mass* counter placement ("on each" / "on all") within a
+/// single counter-placement clause. The caller MUST pass only the primary
+/// clause text — never a full compound string — otherwise a trailing "on each"
+/// conjunct would wrongly promote a targeted primary clause.
+pub(super) fn counter_placement_is_mass(clause_lower: &str) -> bool {
+    nom_primitives::scan_contains(clause_lower, "counter on each")
+        || nom_primitives::scan_contains(clause_lower, "counters on each")
+        || nom_primitives::scan_contains(clause_lower, "counter on all")
+        || nom_primitives::scan_contains(clause_lower, "counters on all")
+        || nom_primitives::scan_contains(clause_lower, "on each ")
+        || nom_primitives::scan_contains(clause_lower, "on all ")
+}
+
 pub(super) fn parse_zone_counter_ast(
     text: &str,
     lower: &str,
@@ -5428,12 +5441,7 @@ pub(super) fn parse_zone_counter_ast(
         // between the counter noun and the target — e.g. Gruff Triplets:
         // "put a number of +1/+1 counters equal to its power on each creature you
         // control named ~".
-        let is_all = nom_primitives::scan_contains(lower, "counter on each")
-            || nom_primitives::scan_contains(lower, "counters on each")
-            || nom_primitives::scan_contains(lower, "counter on all")
-            || nom_primitives::scan_contains(lower, "counters on all")
-            || nom_primitives::scan_contains(lower, "on each ")
-            || nom_primitives::scan_contains(lower, "on all ");
+        let is_all = counter_placement_is_mass(lower);
         return match try_parse_put_counter(lower, text, ctx) {
             Some((
                 Effect::PutCounter {
@@ -5882,6 +5890,23 @@ mod tests {
 
     fn has_prop(tf: &TypedFilter, prop: FilterProp) -> bool {
         tf.properties.iter().any(|candidate| candidate == &prop)
+    }
+
+    /// CR 122.1: `counter_placement_is_mass` recognizes "on each"/"on all"
+    /// mass placements and rejects targeted ("on target") or anaphoric
+    /// ("on it") single-object placements.
+    #[test]
+    fn counter_placement_is_mass_predicate() {
+        assert!(counter_placement_is_mass(
+            "a +1/+1 counter on each creature"
+        ));
+        assert!(counter_placement_is_mass(
+            "a loyalty counter on all planeswalkers"
+        ));
+        assert!(!counter_placement_is_mass(
+            "a +1/+1 counter on target creature"
+        ));
+        assert!(!counter_placement_is_mass("a stun counter on it"));
     }
 
     /// Issue #408 — "Counter target activated ability, triggered ability, or

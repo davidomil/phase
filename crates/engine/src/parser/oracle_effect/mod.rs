@@ -5782,19 +5782,33 @@ fn try_parse_verb_and_target<'a>(
                 target,
             },
             rem,
-            _multi_target,
+            multi_target,
         )) = counter::try_parse_put_counter(lower, text, ctx)
         {
-            return Some((
-                TargetedImperativeAst::ZoneCounterProxy(Box::new(
-                    ZoneCounterImperativeAst::PutCounter {
-                        counter_type,
-                        count,
-                        target,
-                    },
-                )),
-                rem,
-            ));
+            // CR 122.1: Run mass detection against ONLY the primary clause — the slice
+            // try_parse_put_counter consumed (`text` minus `rem`) — never the full
+            // compound `lower`. A trailing "on each" conjunct in `lower` would otherwise
+            // wrongly promote a targeted primary clause. `rem` is a suffix-slice of the
+            // same `text` buffer, so `text.len() - rem.len()` always lands on a valid
+            // UTF-8 char boundary and `text[..text.len() - rem.len()]` is sound.
+            let primary_clause = &text[..text.len() - rem.len()];
+            let primary_clause_lower = primary_clause.to_ascii_lowercase();
+            let ast = if imperative::counter_placement_is_mass(&primary_clause_lower)
+                && multi_target.is_none()
+            {
+                ZoneCounterImperativeAst::PutCounterAll {
+                    counter_type,
+                    count,
+                    target,
+                }
+            } else {
+                ZoneCounterImperativeAst::PutCounter {
+                    counter_type,
+                    count,
+                    target,
+                }
+            };
+            return Some((TargetedImperativeAst::ZoneCounterProxy(Box::new(ast)), rem));
         }
     }
 
@@ -5909,6 +5923,30 @@ fn try_split_targeted_compound(text: &str, ctx: &mut ParseContext) -> Option<Par
         && tag::<_, _, OracleError<'_>>("the top ")
             .parse(sub_lower.as_str())
             .is_ok()
+    {
+        if let Some(verb) = extract_effect_verb(&primary_effect) {
+            let reparsed_text = format!("{verb} {sub_text}");
+            let reparsed = parse_imperative_effect(&reparsed_text, &mut continuation_ctx);
+            if !matches!(reparsed.effect, Effect::Unimplemented { .. }) {
+                sub_clause = reparsed;
+            }
+        }
+    }
+
+    // CR 608.2c: Article-led counter carry-forward for compound actions.
+    // "put a +1/+1 counter on each creature you control and a loyalty counter
+    // on each planeswalker you control" splits on " and " into sub-text
+    // "a loyalty counter on each planeswalker you control" — a verbless counter
+    // clause starting with an article. Prepend the primary verb so it becomes
+    // "put a loyalty counter on each planeswalker you control".
+    if matches!(sub_clause.effect, Effect::Unimplemented { .. })
+        && alt((
+            tag::<_, _, OracleError<'_>>("a "),
+            tag::<_, _, OracleError<'_>>("an "),
+        ))
+        .parse(sub_lower.as_str())
+        .is_ok()
+        && nom_primitives::scan_contains(&sub_lower, "counter on")
     {
         if let Some(verb) = extract_effect_verb(&primary_effect) {
             let reparsed_text = format!("{verb} {sub_text}");
@@ -14763,6 +14801,9 @@ fn extract_effect_verb(effect: &Effect) -> Option<&'static str> {
         Effect::Sacrifice { .. } => Some("sacrifice"),
         Effect::Tap { .. } | Effect::TapAll { .. } => Some("tap"),
         Effect::Untap { .. } | Effect::UntapAll { .. } => Some("untap"),
+        // CR 608.2c: distributive "put" carries forward to a verbless trailing
+        // counter conjunct ("...and a loyalty counter on each planeswalker...").
+        Effect::PutCounter { .. } | Effect::PutCounterAll { .. } => Some("put"),
         _ => None,
     }
 }
@@ -14801,6 +14842,84 @@ mod tests {
 
     fn has_type(tf: &TypedFilter, ty: TypeFilter) -> bool {
         tf.type_filters.iter().any(|candidate| candidate == &ty)
+    }
+
+    /// Issue #445 (Brokers Ascendancy): a compound counter clause whose FIRST
+    /// conjunct is itself a mass placement ("on each") must keep the primary
+    /// effect as `PutCounterAll`, and the verbless trailing conjunct must carry
+    /// the "put" verb forward and resolve to its own `PutCounterAll`.
+    #[test]
+    fn compound_mass_counter_first_conjunct_stays_put_counter_all() {
+        let clause = parse_effect_clause(
+            "put a +1/+1 counter on each creature you control and a loyalty \
+             counter on each planeswalker you control",
+            &mut ParseContext::default(),
+        );
+        // Primary: +1/+1 on each creature you control.
+        match &clause.effect {
+            Effect::PutCounterAll {
+                counter_type,
+                target,
+                ..
+            } => {
+                assert_eq!(*counter_type, CounterType::Plus1Plus1);
+                let tf = typed_leg(target).expect("primary target should be typed");
+                assert!(has_type(tf, TypeFilter::Creature));
+                assert_eq!(tf.controller, Some(ControllerRef::You));
+            }
+            other => panic!("expected primary PutCounterAll, got {other:?}"),
+        }
+        // Sub: loyalty on each planeswalker you control.
+        let sub = clause.sub_ability.expect("expected a trailing sub_ability");
+        match &*sub.effect {
+            Effect::PutCounterAll {
+                counter_type,
+                target,
+                ..
+            } => {
+                assert_eq!(*counter_type, CounterType::Loyalty);
+                let tf = typed_leg(target).expect("sub target should be typed");
+                assert!(has_type(tf, TypeFilter::Planeswalker));
+                assert_eq!(tf.controller, Some(ControllerRef::You));
+            }
+            other => panic!("expected sub PutCounterAll, got {other:?}"),
+        }
+        assert!(!matches!(*sub.effect, Effect::Unimplemented { .. }));
+    }
+
+    /// Scoping regression for issue #445: a TARGETED primary counter clause must
+    /// NOT be promoted to `PutCounterAll` just because a TRAILING conjunct is a
+    /// mass placement. Mass detection must run against the primary clause only.
+    #[test]
+    fn compound_targeted_counter_primary_not_promoted_by_trailing_mass() {
+        let clause = parse_effect_clause(
+            "put a +1/+1 counter on target creature and a +1/+1 counter on \
+             each creature you control",
+            &mut ParseContext::default(),
+        );
+        assert!(
+            matches!(clause.effect, Effect::PutCounter { .. }),
+            "primary clause is single-target — must stay PutCounter, got {:?}",
+            clause.effect
+        );
+    }
+
+    /// CR 608.2c: `extract_effect_verb` carries "put" forward for both the
+    /// single-target and mass counter-placement effects.
+    #[test]
+    fn extract_effect_verb_put_counter_returns_put() {
+        let single = Effect::PutCounter {
+            counter_type: CounterType::Plus1Plus1,
+            count: QuantityExpr::Fixed { value: 1 },
+            target: TargetFilter::Typed(TypedFilter::creature()),
+        };
+        let mass = Effect::PutCounterAll {
+            counter_type: CounterType::Loyalty,
+            count: QuantityExpr::Fixed { value: 1 },
+            target: TargetFilter::Typed(TypedFilter::new(TypeFilter::Planeswalker)),
+        };
+        assert_eq!(extract_effect_verb(&single), Some("put"));
+        assert_eq!(extract_effect_verb(&mass), Some("put"));
     }
 
     fn has_prop(tf: &TypedFilter, prop: FilterProp) -> bool {
