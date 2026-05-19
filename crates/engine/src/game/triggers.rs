@@ -10988,6 +10988,183 @@ pub mod tests {
             "unkicked Sowing Mycospawn must not exile the land (intervening-'if' false)"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Issue #494: Goblin Bushwhacker is a placeholder permanent spell (vanilla
+    // creature with an ETB-only trigger and NO on-resolve Spell ability —
+    // `abilities: []`). Its ETB trigger is gated by an intervening-'if'
+    // `AdditionalCostPaid` condition. Because the resolving stack object has
+    // `ability == None`, the kicker restore in `stack.rs` was previously
+    // skipped — `move_to_zone` → `reset_for_battlefield_entry` had already
+    // cleared `kickers_paid` per CR 400.7, leaving the trigger condition false
+    // even when the spell was kicked. CR 400.7d permits the resulting
+    // permanent's ability to reference costs paid to cast the spell.
+    // -----------------------------------------------------------------------
+
+    const GOBLIN_BUSHWHACKER_ORACLE: &str =
+        "Kicker {R} (You may pay an additional {R} as you cast this spell.)\n\
+        When this creature enters, if it was kicked, creatures you control get \
+        +1/+0 and gain haste until end of turn.";
+
+    /// Build a scenario with Goblin Bushwhacker ({R}, kicker {R}) in P0's hand
+    /// and a pre-existing 2/2 vanilla creature P0 controls (the buff target).
+    /// Returns the runner, the Bushwhacker spell `ObjectId`/`CardId`, and the
+    /// vanilla creature's `ObjectId`.
+    fn goblin_bushwhacker_scenario() -> (
+        crate::game::scenario::GameRunner,
+        ObjectId,
+        CardId,
+        ObjectId,
+    ) {
+        use crate::game::scenario::GameScenario;
+        use crate::types::mana::ManaCostShard;
+
+        let mut scenario = GameScenario::new();
+        scenario.at_phase(Phase::PreCombatMain);
+
+        let bushwhacker_builder = scenario.add_creature_to_hand_from_oracle(
+            PlayerId(0),
+            "Goblin Bushwhacker",
+            1,
+            1,
+            GOBLIN_BUSHWHACKER_ORACLE,
+        );
+        let spell_id = bushwhacker_builder.id();
+        let spell_card_id = scenario.state.objects[&spell_id].card_id;
+        scenario.state.objects.get_mut(&spell_id).unwrap().mana_cost = ManaCost::Cost {
+            shards: vec![ManaCostShard::Red],
+            generic: 0,
+        };
+
+        // Pre-existing creature P0 controls — the buff target. A separate
+        // object from Bushwhacker itself so the assertion proves the static
+        // ability reaches other creatures, not just the source.
+        let ally = scenario.add_vanilla(PlayerId(0), 2, 2);
+
+        let runner = scenario.build();
+        (runner, spell_id, spell_card_id, ally)
+    }
+
+    /// Add red mana to P0's pool: {R}{R} when `kicked` (mana cost + kicker),
+    /// {R} otherwise.
+    fn fund_goblin_bushwhacker(runner: &mut crate::game::scenario::GameRunner, kicked: bool) {
+        let count = if kicked { 2 } else { 1 };
+        let p0 = runner
+            .state_mut()
+            .players
+            .iter_mut()
+            .find(|p| p.id == PlayerId(0))
+            .unwrap();
+        for _ in 0..count {
+            p0.mana_pool.add(ManaUnit {
+                color: ManaType::Red,
+                source_id: ObjectId(0),
+                snow: false,
+                source_could_produce_two_or_more_colors: false,
+                restrictions: Vec::new(),
+                grants: vec![],
+                expiry: None,
+            });
+        }
+    }
+
+    /// Drive every casting prompt to completion, paying the kicker per
+    /// `kicked`. Returns once the stack is empty and P0 holds priority.
+    fn drive_goblin_bushwhacker(runner: &mut crate::game::scenario::GameRunner, kicked: bool) {
+        for _ in 0..60 {
+            match runner.state().waiting_for.clone() {
+                WaitingFor::Priority { .. } if runner.state().stack.is_empty() => break,
+                WaitingFor::OptionalCostChoice { .. } => {
+                    runner
+                        .act(GameAction::DecideOptionalCost { pay: kicked })
+                        .expect("kicker decision must be accepted");
+                }
+                _ => {
+                    if runner.act(GameAction::PassPriority).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// CR 702.33d + CR 400.7d: Casting Goblin Bushwhacker KICKED must, on the
+    /// ETB trigger's resolution, grant +1/+0 and haste to creatures P0
+    /// controls. Drives the real cast pipeline (`apply`) across the
+    /// `move_to_zone → reset_for_battlefield_entry → stack.rs restore`
+    /// boundary — `kickers_paid` is never hand-stamped. Regression guard for
+    /// issue #494.
+    #[test]
+    fn goblin_bushwhacker_kicked_etb_buffs_creatures_you_control() {
+        let (mut runner, spell_id, spell_card_id, ally) = goblin_bushwhacker_scenario();
+        fund_goblin_bushwhacker(&mut runner, true);
+
+        runner
+            .act(GameAction::CastSpell {
+                object_id: spell_id,
+                card_id: spell_card_id,
+                targets: vec![],
+            })
+            .expect("casting Goblin Bushwhacker must be accepted");
+
+        drive_goblin_bushwhacker(&mut runner, true);
+
+        // The kicker payment must survive zone change onto the permanent — the
+        // ETB trigger's intervening-'if' reads it.
+        assert_eq!(
+            runner.state().objects[&spell_id].kickers_paid,
+            vec![KickerVariant::First],
+            "kicked Bushwhacker's permanent must retain kickers_paid after resolution"
+        );
+
+        // The ETB trigger's static ability buffed the pre-existing ally.
+        let ally_obj = &runner.state().objects[&ally];
+        assert_eq!(
+            ally_obj.power,
+            Some(3),
+            "kicked Bushwhacker must grant +1/+0 to creatures P0 controls (2/2 -> 3/2)"
+        );
+        assert!(
+            ally_obj.has_keyword(&Keyword::Haste),
+            "kicked Bushwhacker must grant haste to creatures P0 controls"
+        );
+    }
+
+    /// Negative control: casting Goblin Bushwhacker UNKICKED — the ETB
+    /// trigger's intervening-'if' `AdditionalCostPaid` condition is false, so
+    /// no buff and no haste are granted.
+    #[test]
+    fn goblin_bushwhacker_unkicked_etb_grants_no_buff() {
+        let (mut runner, spell_id, spell_card_id, ally) = goblin_bushwhacker_scenario();
+        fund_goblin_bushwhacker(&mut runner, false);
+
+        runner
+            .act(GameAction::CastSpell {
+                object_id: spell_id,
+                card_id: spell_card_id,
+                targets: vec![],
+            })
+            .expect("casting Goblin Bushwhacker must be accepted");
+
+        drive_goblin_bushwhacker(&mut runner, false);
+
+        assert!(
+            runner.state().objects[&spell_id].kickers_paid.is_empty(),
+            "unkicked Bushwhacker must have no kicker payments"
+        );
+
+        let ally_obj = &runner.state().objects[&ally];
+        assert_eq!(
+            ally_obj.power,
+            Some(2),
+            "unkicked Bushwhacker must not buff creatures (ally stays 2/2)"
+        );
+        assert!(
+            !ally_obj.has_keyword(&Keyword::Haste),
+            "unkicked Bushwhacker must not grant haste (intervening-'if' false)"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Issue #423: dies-triggers (Undying, Blood Artist-class) must not be lost
     // when a creature is sacrificed inside a resolution-choice handler.

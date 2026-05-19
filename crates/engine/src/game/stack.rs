@@ -414,6 +414,23 @@ pub fn resolve_top(state: &mut GameState, events: &mut Vec<GameEvent>) {
                 .get(&entry.id)
                 .map(|obj| obj.convoked_creatures.clone())
                 .unwrap_or_default();
+            // CR 702.33d + CR 400.7 + CR 400.7d: Capture the authoritative kicker
+            // payments BEFORE `move_to_zone` clears `kickers_paid` on the new
+            // battlefield object (CR 400.7 new-object rule, applied by
+            // `reset_for_battlefield_entry`). The resolving spell's `SpellContext`
+            // is authoritative when present; placeholder permanent spells (vanilla
+            // / ETB-only creatures with no on-resolve Spell ability) have
+            // `ability == None`, so fall back to the stack object's stamped value.
+            let kickers_paid: Vec<crate::types::ability::KickerVariant> = ability
+                .as_ref()
+                .map(|a| a.context.kickers_paid.clone())
+                .unwrap_or_else(|| {
+                    state
+                        .objects
+                        .get(&entry.id)
+                        .map(|o| o.kickers_paid.clone())
+                        .unwrap_or_default()
+                });
             let cast_timing_permission = state
                 .objects
                 .get(&entry.id)
@@ -498,18 +515,23 @@ pub fn resolve_top(state: &mut GameState, events: &mut Vec<GameEvent>) {
                         if let Some(obj) = state.objects.get_mut(&entry.id) {
                             if let Some(ref ability) = ability {
                                 obj.cast_from_zone = ability.context.cast_from_zone;
-                                // CR 702.33d + CR 702.33f: Propagate kicker payments
-                                // from the resolving spell's `SpellContext` to the
-                                // resulting permanent so post-resolution gates
-                                // (`ReplacementCondition::CastViaKicker` and ETB
-                                // `AbilityCondition::AdditionalCostPaid` on triggered
-                                // abilities) can evaluate.
-                                obj.kickers_paid.clone_from(&ability.context.kickers_paid);
                             }
                             if let Some(permission) = cast_timing_permission {
                                 obj.cast_timing_permission = Some((permission, state.turn_number));
                             }
                             obj.convoked_creatures = convoked_creatures;
+                            // CR 702.33d + CR 400.7d: Restore kicker payments onto the
+                            // resulting permanent so post-resolution gates
+                            // (`ReplacementCondition::CastViaKicker` and ETB
+                            // `AbilityCondition::AdditionalCostPaid` on triggered
+                            // abilities) can evaluate. `move_to_zone` cleared
+                            // `kickers_paid` per CR 400.7 (new object on zone change);
+                            // CR 400.7d permits an ability of the permanent to
+                            // reference costs paid to cast the spell it became. This
+                            // restore is unconditional — mirroring `convoked_creatures`
+                            // — because placeholder permanent spells have
+                            // `ability == None` and would otherwise lose the data.
+                            obj.kickers_paid = kickers_paid;
                         }
                         if let Some(exiled_id) = ability
                             .as_ref()
@@ -578,10 +600,22 @@ pub fn resolve_top(state: &mut GameState, events: &mut Vec<GameEvent>) {
                         .as_ref()
                         .and_then(|a| a.context.cast_from_zone)
                         .or_else(|| state.objects.get(&entry.id).and_then(|o| o.cast_from_zone));
+                    // CR 702.33d + CR 400.7d: Use the authoritative kicker payments
+                    // (resolving spell's `SpellContext` when present, else the stack
+                    // object's stamped value) so placeholder permanent spells with
+                    // `ability == None` are not silently de-kicked when a replacement
+                    // needs a player choice. `engine_replacement` restores this onto
+                    // the permanent unconditionally after the choice resolves.
                     let kickers_paid = ability
                         .as_ref()
                         .map(|a| a.context.kickers_paid.clone())
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| {
+                            state
+                                .objects
+                                .get(&entry.id)
+                                .map(|o| o.kickers_paid.clone())
+                                .unwrap_or_default()
+                        });
                     state.pending_spell_resolution =
                         Some(crate::types::game_state::PendingSpellResolution {
                             object_id: entry.id,
