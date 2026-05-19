@@ -2338,7 +2338,7 @@ fn priority_actions(state: &GameState, player: PlayerId) -> Vec<CandidateAction>
         // suppressed by split second, mirroring the hand-zone loop above.
         for &obj_id in &state.players[player.0 as usize].graveyard {
             if let Some(obj) = state.objects.get(&obj_id) {
-                // CR 602.2: "Only an object's controller (or its owner, if it
+                // CR 602.2a: "Only an object's controller (or its owner, if it
                 // doesn't have a controller) can activate its activated
                 // ability." Restrict candidates to the acting player.
                 if obj.controller == player {
@@ -2401,7 +2401,7 @@ fn priority_actions(state: &GameState, player: PlayerId) -> Vec<CandidateAction>
     // "{1}, Exile this card from your graveyard: Add one mana of any color")
     // remain legal under split second because they are mana abilities, so this
     // loop lives outside the split-second-gated block — mirroring the hand-zone
-    // mana loop above. CR 602.2: only the object's controller can activate it.
+    // mana loop above. CR 602.2a: only the object's controller can activate it.
     for &obj_id in &state.players[player.0 as usize].graveyard {
         if let Some(obj) = state.objects.get(&obj_id) {
             if obj.controller == player {
