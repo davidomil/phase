@@ -42,7 +42,7 @@ expression: "&lowered"
             "kind": "Activated",
             "effect": {
               "type": "ChangeZone",
-              "origin": null,
+              "origin": "Exile",
               "destination": "Battlefield",
               "target": {
                 "type": "ParentTarget"

@@ -612,8 +612,14 @@ pub fn resolve(
             .map(|o| o.zone)
             .unwrap_or(Zone::Battlefield);
 
-        // CR 400.7: If an origin zone is specified and the object is no longer
-        // in that zone, the zone change is impossible — skip this object.
+        // CR 400.7: An object that moves zones becomes a new object; if an origin
+        // zone is specified and the object is no longer in that zone, the zone
+        // change is impossible — skip this object.
+        // CR 603.7c: A delayed triggered ability's referent is checked against its
+        // expected origin zone (fixed at delayed-trigger creation, CR 603.7a). A
+        // referent that left that zone is, per CR 400.7, a new object the snapshot
+        // does not name, so the delayed return must not move it. (Re-entry into the
+        // same zone is NOT covered — there is no per-zone-visit object identity.)
         // Prevents delayed triggers from moving objects that have already left
         // the expected zone (e.g., Warp creature that died before end step).
         if let Some(expected_origin) = origin {

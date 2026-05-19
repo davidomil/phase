@@ -36,7 +36,7 @@ expression: def
         "kind": "Spell",
         "effect": {
           "type": "ChangeZone",
-          "origin": null,
+          "origin": "Exile",
           "destination": "Battlefield",
           "target": {
             "type": "ParentTarget"

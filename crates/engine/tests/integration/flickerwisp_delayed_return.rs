@@ -199,3 +199,132 @@ fn flickerwisp_delayed_return_fires_at_end_step() {
         "checkpoint (c): the one-shot delayed trigger must be consumed after firing"
     );
 }
+
+/// Bug-triage issue #485 — CR 603.7c discriminator.
+///
+/// A delayed `AtNextPhase{End}` return snapshots the exiled victim's `ObjectId`
+/// but, per CR 603.7c, must only return it if it is *still in the zone it was
+/// expected to be in* (Exile). If the victim leaves Exile before the End step
+/// (here: Exile -> Graveyard via the real zone-move pipeline), the delayed
+/// trigger still fires once and is consumed (CR 603.7b) but resolves to a no-op
+/// move — it must NOT drag the victim onto the battlefield.
+///
+/// This is discriminating: with the parser-side `origin` stamp reverted the
+/// delayed `ChangeZone` carries `origin: None`, the resolver's CR 400.7 guard is
+/// skipped, and the victim is wrongly moved to the battlefield — the assertions
+/// below fail. With the fix (`origin: Some(Exile)`) the guard fires and the
+/// victim stays in the graveyard.
+#[test]
+fn flickerwisp_delayed_return_skipped_when_victim_left_exile() {
+    let Some(db) = load_db() else {
+        return;
+    };
+
+    let mut scenario = GameScenario::new();
+    scenario.at_phase(Phase::PreCombatMain);
+
+    let flickerwisp = scenario.add_real_card(P0, "Flickerwisp", Zone::Hand, db);
+    let victim = scenario.add_real_card(P1, "Grizzly Bears", Zone::Battlefield, db);
+
+    for _ in 0..20 {
+        scenario.add_real_card(P0, "Plains", Zone::Library, db);
+        scenario.add_real_card(P1, "Plains", Zone::Library, db);
+    }
+
+    let mut runner = scenario.build();
+    engine::game::rehydrate_game_from_card_db(runner.state_mut(), db);
+    add_flickerwisp_mana(&mut runner);
+
+    let card_id = runner.state().objects[&flickerwisp].card_id;
+    runner
+        .act(GameAction::CastSpell {
+            object_id: flickerwisp,
+            card_id,
+            targets: vec![],
+        })
+        .expect("Flickerwisp cast should be accepted");
+
+    // Drive the ETB trigger to resolution so the victim is exiled and the
+    // delayed trigger is installed (same drive loop as the happy-path test).
+    let mut guard = 0;
+    while runner.state().delayed_triggers.is_empty() {
+        guard += 1;
+        assert!(
+            guard < 64,
+            "Flickerwisp's ETB trigger never resolved; last waiting_for = {:?}",
+            runner.state().waiting_for
+        );
+        match &runner.state().waiting_for {
+            WaitingFor::TriggerTargetSelection { .. } => {
+                runner
+                    .act(GameAction::ChooseTarget {
+                        target: Some(TargetRef::Object(victim)),
+                    })
+                    .expect("ETB trigger should accept the chosen permanent target");
+            }
+            _ => {
+                runner
+                    .act(GameAction::PassPriority)
+                    .expect("priority pass while resolving the ETB trigger should succeed");
+            }
+        }
+    }
+
+    assert_eq!(
+        runner.state().objects[&victim].zone,
+        Zone::Exile,
+        "precondition: the targeted permanent must be exiled"
+    );
+
+    // Discriminating mutation: drive the victim OUT of Exile before the End
+    // step, through the real zone-move pipeline.
+    let mut events = Vec::new();
+    engine::game::zones::move_to_zone(runner.state_mut(), victim, Zone::Graveyard, &mut events);
+    assert_eq!(
+        runner.state().objects[&victim].zone,
+        Zone::Graveyard,
+        "precondition: the victim must have left Exile for the graveyard"
+    );
+
+    // Pass priority past P0's End step. The one-shot delayed trigger still fires
+    // and is consumed (CR 603.7b) but resolves to a no-op move (CR 603.7c).
+    let mut guard = 0;
+    while !runner.state().delayed_triggers.is_empty() || !runner.state().stack.is_empty() {
+        guard += 1;
+        assert!(
+            guard < 256,
+            "the AtNextPhase{{End}} delayed trigger never fired/resolved; \
+             phase = {:?}, dt = {}, stack = {}",
+            runner.state().phase,
+            runner.state().delayed_triggers.len(),
+            runner.state().stack.len(),
+        );
+        if runner.act(GameAction::PassPriority).is_err() {
+            panic!(
+                "priority pass stalled before the delayed trigger fired; phase = {:?}",
+                runner.state().phase,
+            );
+        }
+    }
+
+    // CR 603.7c: the victim left its expected zone (Exile) — the delayed return
+    // must not move it. It stays in the graveyard.
+    assert_eq!(
+        runner.state().objects[&victim].zone,
+        Zone::Graveyard,
+        "CR 603.7c: a victim that left Exile must NOT be dragged to the \
+         battlefield by the delayed return"
+    );
+    assert_ne!(
+        runner.state().objects[&victim].zone,
+        Zone::Battlefield,
+        "CR 603.7c: explicit negative — the victim must not be on the battlefield"
+    );
+    // CR 603.7b: the one-shot delayed trigger is consumed even though it moved
+    // nothing.
+    assert!(
+        runner.state().delayed_triggers.is_empty(),
+        "CR 603.7b: the one-shot delayed trigger must be consumed even when it \
+         affects nothing"
+    );
+}

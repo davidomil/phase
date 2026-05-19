@@ -9349,6 +9349,38 @@ fn rewrite_parent_targets_to_tracked_set(effect: &mut Effect) {
     }
 }
 
+/// CR 603.7c + CR 400.7 + CR 603.7a: A *delayed* triggered ability that returns a
+/// snapshotted `ParentTarget` referent may only move it if it is still in the zone
+/// the prior clause placed it in (the expected zone, fixed at delayed-trigger
+/// creation per CR 603.7a). Walk the effect tree for `CreateDelayedTrigger`
+/// wrappers ONLY — a non-delayed `ParentTarget` `ChangeZone` has no snapshot
+/// semantics and must not be stamped (an intervening chain clause could
+/// legitimately re-move the referent). Mirrors `rewrite_parent_targets_to_tracked_set`.
+fn stamp_delayed_returns(effect: &mut Effect, expected: Zone) {
+    if let Effect::CreateDelayedTrigger { effect, .. } = effect {
+        stamp_inside_delayed(&mut effect.effect, expected);
+    }
+}
+
+/// Stamps the expected origin zone onto every `ParentTarget`-targeted
+/// `ChangeZone`/`ChangeZoneAll` reached inside a `CreateDelayedTrigger` subtree
+/// whose `origin` is still unset, so the resolver's CR 400.7 `origin` guard
+/// (`change_zone::resolve`) fires. Recurses into nested `CreateDelayedTrigger`.
+fn stamp_inside_delayed(effect: &mut Effect, expected: Zone) {
+    match effect {
+        Effect::ChangeZone { target, origin, .. }
+        | Effect::ChangeZoneAll { target, origin, .. }
+            if origin.is_none() && matches!(target, TargetFilter::ParentTarget) =>
+        {
+            *origin = Some(expected);
+        }
+        Effect::CreateDelayedTrigger { effect, .. } => {
+            stamp_inside_delayed(&mut effect.effect, expected);
+        }
+        _ => {}
+    }
+}
+
 fn append_to_deepest_sub_ability(
     ability: &mut AbilityDefinition,
     tail: Option<Box<AbilityDefinition>>,
@@ -11934,6 +11966,23 @@ pub(crate) fn lower_effect_chain_ir(ir: &EffectChainIr) -> AbilityDefinition {
                             mark_uses_tracked_set(current);
                             rewrite_parent_targets_to_tracked_set(&mut current.effect);
                         }
+                    }
+                }
+
+                // CR 603.7c: Stamp the prior clause's zone destination as the
+                // expected origin of any delayed `ParentTarget` return, so the
+                // resolver's CR 400.7 `origin` guard suppresses the return when the
+                // snapshotted referent has left that zone. Sibling of (not nested
+                // in) the tracked-set rewrite above — this must fire for the
+                // non-anaphor "that card" phrasing too.
+                let prev_zone: Option<Zone> = match prev_eff {
+                    Effect::ChangeZone { destination, .. }
+                    | Effect::ChangeZoneAll { destination, .. } => Some(*destination),
+                    _ => None,
+                };
+                if let Some(zone) = prev_zone {
+                    for current in &mut current_defs {
+                        stamp_delayed_returns(&mut current.effect, zone);
                     }
                 }
             }
@@ -32703,6 +32752,133 @@ mod snapshot_tests {
             AbilityKind::Spell,
         );
         assert_json_snapshot!("delayed_exile_return_next_end_step", def);
+    }
+
+    /// Walks a parsed chain to the `ChangeZone` nested inside the first
+    /// `CreateDelayedTrigger` reachable via `sub_ability`. Returns `(origin,
+    /// is_parent_target)`.
+    fn delayed_return_change_zone(def: &AbilityDefinition) -> (Option<Zone>, bool) {
+        let mut cursor = Some(def);
+        while let Some(node) = cursor {
+            if let Effect::CreateDelayedTrigger { effect, .. } = &*node.effect {
+                if let Effect::ChangeZone { origin, target, .. } = &*effect.effect {
+                    return (*origin, matches!(target, TargetFilter::ParentTarget));
+                }
+            }
+            cursor = node.sub_ability.as_deref();
+        }
+        panic!("no delayed-trigger ChangeZone found in chain");
+    }
+
+    /// CR 603.7c: real Flickerwisp phrasing ("return that card") stamps the
+    /// prior exile clause's destination as the delayed return's expected origin.
+    /// Regression guard for the anaphor-detector-gating defect.
+    #[test]
+    fn delayed_return_stamps_exile_origin_for_that_card_phrasing() {
+        let def = parse_effect_chain(
+            "exile target creature. return that card to the battlefield at the beginning of the next end step",
+            AbilityKind::Spell,
+        );
+        let (origin, is_parent) = delayed_return_change_zone(&def);
+        assert_eq!(origin, Some(Zone::Exile));
+        assert!(is_parent);
+    }
+
+    /// The stamp is independent of which anaphor the text uses ("return it").
+    #[test]
+    fn delayed_return_stamps_exile_origin_for_it_phrasing() {
+        let def = parse_effect_chain(
+            "exile target creature. return it to the battlefield under its owner's control at the beginning of the next end step",
+            AbilityKind::Spell,
+        );
+        let (origin, _) = delayed_return_change_zone(&def);
+        assert_eq!(origin, Some(Zone::Exile));
+    }
+
+    /// SHOULD-FIX 1: a top-level `ParentTarget` `ChangeZone` NOT wrapped in a
+    /// `CreateDelayedTrigger` must keep `origin == None` — only delayed snapshot
+    /// returns are stamped.
+    #[test]
+    fn non_delayed_parent_target_change_zone_not_stamped() {
+        let mut prev = Effect::ChangeZone {
+            origin: None,
+            destination: Zone::Exile,
+            target: TargetFilter::ParentTarget,
+            owner_library: false,
+            enter_transformed: false,
+            under_your_control: false,
+            enter_tapped: false,
+            enters_attacking: false,
+            up_to: false,
+            enter_with_counters: vec![],
+        };
+        // Non-delayed top-level ParentTarget return.
+        stamp_delayed_returns(&mut prev, Zone::Exile);
+        match prev {
+            Effect::ChangeZone { origin, .. } => assert_eq!(origin, None),
+            _ => unreachable!(),
+        }
+    }
+
+    /// No spurious stamp on a non-snapshot delayed clause (draw a card).
+    #[test]
+    fn delayed_non_snapshot_clause_not_stamped() {
+        let def = parse_effect_chain(
+            "exile target creature. at the beginning of the next end step, draw a card",
+            AbilityKind::Spell,
+        );
+        // The delayed clause has no ChangeZone — walk it and confirm no panic-free
+        // ChangeZone exists; if a CreateDelayedTrigger is present its inner effect
+        // is Draw, not ChangeZone.
+        let mut cursor = Some(&def);
+        let mut saw_delayed = false;
+        while let Some(node) = cursor {
+            if let Effect::CreateDelayedTrigger { effect, .. } = &*node.effect {
+                saw_delayed = true;
+                assert!(
+                    !matches!(&*effect.effect, Effect::ChangeZone { .. }),
+                    "delayed draw clause must not become a ChangeZone"
+                );
+            }
+            cursor = node.sub_ability.as_deref();
+        }
+        assert!(saw_delayed, "expected a delayed-trigger clause");
+    }
+
+    /// NIT 2 (mandatory): `stamp_inside_delayed` reads the prior clause's
+    /// `destination` rather than hard-coding `Exile`. Synthetic two-clause IR with
+    /// a non-Exile prior destination (Hand) proves the helper tracks `destination`.
+    #[test]
+    fn delayed_return_stamps_non_exile_prior_destination() {
+        let inner_return = AbilityDefinition::new(
+            AbilityKind::Spell,
+            Effect::ChangeZone {
+                origin: None,
+                destination: Zone::Battlefield,
+                target: TargetFilter::ParentTarget,
+                owner_library: false,
+                enter_transformed: false,
+                under_your_control: false,
+                enter_tapped: false,
+                enters_attacking: false,
+                up_to: false,
+                enter_with_counters: vec![],
+            },
+        );
+        let mut delayed = Effect::CreateDelayedTrigger {
+            condition: DelayedTriggerCondition::AtNextPhase { phase: Phase::End },
+            effect: Box::new(inner_return),
+            uses_tracked_set: false,
+        };
+        // Prior clause placed the referent in Hand, not Exile.
+        stamp_delayed_returns(&mut delayed, Zone::Hand);
+        match delayed {
+            Effect::CreateDelayedTrigger { effect, .. } => match &*effect.effect {
+                Effect::ChangeZone { origin, .. } => assert_eq!(*origin, Some(Zone::Hand)),
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
     }
 
     // -----------------------------------------------------------------------
