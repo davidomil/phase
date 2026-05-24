@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 
 import {
   type CardRuling,
+  ensureCardLocale,
   getCardFaceData,
   getCardParseDetails,
   getCardRulings,
 } from "../services/engineRuntime";
+import { usePreferencesStore } from "../stores/preferencesStore";
 
 /**
  * Engine-parsed card face data returned from WASM.
@@ -43,6 +45,7 @@ export interface ParsedItem {
  * wrapper ensures that as a prerequisite, then performs the query.
  */
 export function useEngineCardData(cardName: string | null): EngineCardFace | null {
+  const language = usePreferencesStore((s) => s.language);
   const [data, setData] = useState<EngineCardFace | null>(null);
 
   useEffect(() => {
@@ -53,20 +56,67 @@ export function useEngineCardData(cardName: string | null): EngineCardFace | nul
 
     let cancelled = false;
 
-    getCardFaceData(cardName)
-      .then((result) => {
-        if (cancelled) return;
+    void (async () => {
+      const result = (await getCardFaceData(cardName)) as EngineCardFace | null;
+      if (cancelled) return;
+      if (!result || language === "en") {
         setData(result ?? null);
+        return;
+      }
+      // Content i18n: overlay the engine's English name/oracle text with the
+      // selected locale's official MTGJSON text, per-field falling back to
+      // English. Identity (lookup key) stays English; only display strings change.
+      const localeMap = await ensureCardLocale(language);
+      if (cancelled) return;
+      const localized = localeMap.get(result.name.toLowerCase());
+      setData(
+        localized
+          ? {
+              ...result,
+              name: localized.name ?? result.name,
+              oracle_text: localized.oracle_text ?? result.oracle_text,
+            }
+          : result,
+      );
+    })().catch(() => {
+      if (!cancelled) setData(null);
+    });
+
+    return () => { cancelled = true; };
+  }, [cardName, language]);
+
+  return data;
+}
+
+/**
+ * Returns a card's name in the selected UI language, falling back to the English
+ * name. For name-only display sites (hand, battlefield face, deck rows) that
+ * don't need the full engine face data. `name` must be the canonical English
+ * card name — the engine's identity key, which stays English everywhere.
+ */
+export function useLocalizedCardName(name: string | null): string | null {
+  const language = usePreferencesStore((s) => s.language);
+  const [localized, setLocalized] = useState<string | null>(name);
+
+  useEffect(() => {
+    setLocalized(name);
+    if (!name || language === "en") return;
+
+    let cancelled = false;
+    ensureCardLocale(language)
+      .then((map) => {
+        if (cancelled) return;
+        const loc = map.get(name.toLowerCase());
+        if (loc?.name) setLocalized(loc.name);
       })
       .catch(() => {
-        if (cancelled) return;
-        setData(null);
+        /* keep English fallback */
       });
 
     return () => { cancelled = true; };
-  }, [cardName]);
+  }, [name, language]);
 
-  return data;
+  return localized;
 }
 
 /**

@@ -17,6 +17,7 @@ import {
 import type { AIDifficulty } from "../constants/ai";
 import { DEFAULT_AI_DIFFICULTY } from "../constants/ai";
 import type { DeckArchetype } from "../services/engineRuntime";
+import { detectInitialLanguage, SUPPORTED_LNGS, type SupportedLng } from "../i18n/resources";
 
 /** Literal sentinel for "any deck" in AI deck selection. Mirrors `DeckChoice::Random`
  *  naming so the preference value is self-describing without a nullable field. */
@@ -94,6 +95,7 @@ const LEGACY_COMBAT_PACING_MULTIPLIERS: Record<string, number> = {
  *  `resetAllPreferences`, so they can never drift apart. */
 function buildDefaultPreferences(): PreferencesState {
   return {
+    language: detectInitialLanguage(),
     cardSize: "medium",
     hudLayout: "inline",
     followActiveOpponent: true,
@@ -133,6 +135,10 @@ function buildDefaultPreferences(): PreferencesState {
 }
 
 interface PreferencesState {
+  /** Active UI language. Drives react-i18next chrome translation (the store is the
+   *  single source of truth; `i18n/index.ts` mirrors changes). Closed union — not
+   *  the open `(string & {})` pattern, since the supported set is fixed. */
+  language: SupportedLng;
   cardSize: CardSizePreference;
   hudLayout: HudLayout;
   followActiveOpponent: boolean;
@@ -180,6 +186,7 @@ interface PreferencesState {
 }
 
 interface PreferencesActions {
+  setLanguage: (lng: SupportedLng) => void;
   setCardSize: (size: CardSizePreference) => void;
   setHudLayout: (layout: HudLayout) => void;
   setFollowActiveOpponent: (enabled: boolean) => void;
@@ -272,6 +279,8 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
     (set) => ({
       ...buildDefaultPreferences(),
 
+      // Store owns the language; i18n/index.ts subscribes and mirrors it into i18next.
+      setLanguage: (lng) => set({ language: lng }),
       setCardSize: (size) => set({ cardSize: size }),
       setHudLayout: (layout) => set({ hudLayout: layout }),
       setFollowActiveOpponent: (enabled) => set({ followActiveOpponent: enabled }),
@@ -399,7 +408,7 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
     }),
     {
       name: "phase-preferences",
-      version: 8,
+      version: 9,
       // v0 → v1: flat aiDifficulty + aiDeckName become aiSeats[0].
       // v1 → v2: discrete animationSpeed/combatPacing enums become numeric
       //          animationSpeedMultiplier/combatPacingMultiplier.
@@ -414,6 +423,8 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
       // v5 → v6: Replace artStrategy (single enum) with artChain (ordered preference list).
       // v6 → v7: Add aiBracketFilter; legacy stores default to empty (filter off).
       // v7 → v8: Add spellPaymentMode; legacy stores keep default auto.
+      // v8 → v9: Add language; legacy/invalid values fall back to the
+      //          browser-detected default so existing users keep their locale.
       migrate: (persisted: unknown, version: number) => {
         if (!persisted || typeof persisted !== "object") return persisted;
         let migrated = persisted as Record<string, unknown>;
@@ -505,6 +516,17 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
 
         if (version < 8) {
           migrated = { ...migrated, spellPaymentMode: "auto" };
+        }
+
+        if (version < 9) {
+          const lng = (migrated as { language?: unknown }).language;
+          migrated = {
+            ...migrated,
+            language:
+              typeof lng === "string" && (SUPPORTED_LNGS as readonly string[]).includes(lng)
+                ? lng
+                : detectInitialLanguage(),
+          };
         }
 
         return migrated;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 
 import { StackEntry } from "./StackEntry.tsx";
 import {
@@ -69,6 +70,7 @@ function getViewportSize() {
 }
 
 export function StackDisplay() {
+  const { t } = useTranslation("game");
   const stack = useGameStore((s) => s.gameState?.stack ?? EMPTY_STACK);
   const waitingFor = useGameStore((s) => s.waitingFor);
   // Engine-authored stack grouping rides on the same state snapshot that
@@ -196,7 +198,7 @@ export function StackDisplay() {
               type="button"
               onClick={() => setIsCollapsed(false)}
               className="absolute left-0 top-1/2 z-20 flex h-20 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-l-xl rounded-r-md border border-white/10 bg-gray-950/95 text-gray-300 shadow-[0_18px_36px_rgba(0,0,0,0.45)] transition-colors hover:bg-gray-900 hover:text-white"
-              aria-label="Expand stack panel"
+              aria-label={t("stack.expandPanel")}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
                 <path
@@ -212,7 +214,7 @@ export function StackDisplay() {
             <div className="flex h-9 items-center justify-between border-b border-white/10 px-3">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-400">
-                  Stack
+                  {t("stack.title")}
                 </span>
                 <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-200">
                   {stack.length}
@@ -222,7 +224,7 @@ export function StackDisplay() {
                 type="button"
                 onClick={() => setIsCollapsed(true)}
                 className="rounded-md p-1 text-gray-400 transition-colors hover:bg-white/8 hover:text-white"
-                aria-label="Collapse stack panel"
+                aria-label={t("stack.collapsePanel")}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                   <path
