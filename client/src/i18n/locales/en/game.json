@@ -366,6 +366,8 @@
     "chooseTargetForCopySlot": "Choose target for copy: slot {{current}} of {{total}}",
     "chooseNewTargetForCopy": "Choose new target for copy",
     "chooseTargetForCopy": "Choose target for copy",
+    "chooseNewTarget": "Choose the spell's new target",
+    "chooseNewTargetForSpell": "Choose a new target for {{spell}}",
     "chooseCreatureToExplore": "Choose which creature explores next",
     "tapUntappedCreatures_one": "Tap {{count}} untapped creature",
     "tapUntappedCreatures_other": "Tap {{count}} untapped creatures",
@@ -1262,7 +1264,8 @@
     "scopeSingle": "Choose a new target for the spell",
     "scopeMulti": "Choose new targets for the spell",
     "subtitle": "{{scope}}. Current: {{current}}",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "badgeNewTarget": "New target"
   },
   "separatePiles": {
     "chooserName": "Player {{number}}",

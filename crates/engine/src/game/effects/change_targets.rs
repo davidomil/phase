@@ -132,6 +132,7 @@ mod tests {
     use super::*;
     use crate::game::zones::create_object;
     use crate::types::ability::TypedFilter;
+    use crate::types::actions::GameAction;
     use crate::types::card_type::CoreType;
     use crate::types::game_state::{CastingVariant, RetargetScope, StackEntry, StackEntryKind};
     use crate::types::identifiers::CardId;
@@ -248,6 +249,7 @@ mod tests {
     ///      before its effect ran (no `RetargetChoice`).
     ///   2. Once it stopped fizzling, the Aura's hosts had to be enumerated via
     ///      its `Keyword::Enchant` filter (CR 303.4a), not its placeholder effect.
+    ///
     /// Pre-fix, `resolve_top` left `waiting_for == Priority` with Bolt Bend in the
     /// graveyard and the Aura untouched. Post-fix it pauses on `RetargetChoice`
     /// offering every other enchantable creature.
@@ -383,5 +385,32 @@ mod tests {
             "alternative enchantable host must be offered, got {legal_new_targets:?}"
         );
         assert!(state.stack.iter().any(|e| e.id == aura_id));
+
+        // CR 115.7: A single-target retarget resolves through the universal
+        // `ChooseTarget` board-click action — the player picks the new host
+        // directly on the battlefield rather than through the dialog. The Aura
+        // spell's target must update to the chosen host and priority resumes.
+        crate::game::engine::apply(
+            &mut state,
+            PlayerId(0),
+            GameAction::ChooseTarget {
+                target: Some(TargetRef::Object(host_b)),
+            },
+        )
+        .expect("board-click retarget should succeed");
+
+        let aura_targets = state
+            .stack
+            .iter()
+            .find(|e| e.id == aura_id)
+            .and_then(|e| e.ability())
+            .map(|a| a.targets.clone())
+            .expect("aura spell still on stack with targets");
+        assert_eq!(
+            aura_targets,
+            vec![TargetRef::Object(host_b)],
+            "ChooseTarget board-click must retarget the Aura to the chosen host"
+        );
+        assert!(matches!(state.waiting_for, WaitingFor::Priority { .. }));
     }
 }

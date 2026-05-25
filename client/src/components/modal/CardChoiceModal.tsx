@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import { CardImage } from "../card/CardImage.tsx";
-import { cardImageLookup, tokenFiltersForObject } from "../../services/cardImageLookup.ts";
+import { objectImageProps } from "../../services/cardImageLookup.ts";
 import { useGameStore } from "../../stores/gameStore.ts";
 import { useGameDispatch } from "../../hooks/useGameDispatch.ts";
 import { useInspectHoverProps } from "../../hooks/useInspectHoverProps.ts";
@@ -71,20 +71,6 @@ type SaddleMount = Extract<WaitingFor, { type: "SaddleMount" }>;
 type DamageSourceChoice = Extract<WaitingFor, { type: "DamageSourceChoice" }>;
 type ChooseRingBearer = Extract<WaitingFor, { type: "ChooseRingBearer" }>;
 const CHOICE_CARD_IMAGE_CLASS = "";
-
-function objectImageProps(obj: GameObject) {
-  const { name, faceIndex, oracleId, faceName } = cardImageLookup(obj);
-  const isToken = obj.display_source === "Token";
-  return {
-    cardName: name,
-    faceIndex,
-    oracleId,
-    faceName,
-    isToken,
-    tokenFilters: isToken ? tokenFiltersForObject(obj) : undefined,
-    tokenImageRef: isToken ? obj.token_image_ref : undefined,
-  };
-}
 
 function CostActionFooter({
   onCancel,
@@ -327,6 +313,9 @@ export function CardChoiceModal() {
       return <DistributeAmongModal data={waitingFor.data} />;
     case "RetargetChoice":
       if (!canActForWaitingState) return null;
+      // CR 115.7: Single-target retargets are picked directly on the board via
+      // TargetingOverlay; only multi-target (`All`-scope) retargets need the dialog.
+      if (waitingFor.data.scope.type === "Single") return null;
       return <RetargetChoiceModal data={waitingFor.data} />;
     case "ProliferateChoice":
       if (!canActForWaitingState) return null;

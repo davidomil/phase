@@ -131,7 +131,12 @@ export function OpponentHud({ opponentName, onKickPlayer }: OpponentHudProps) {
     (waitingFor?.type === "TargetSelection" || waitingFor?.type === "TriggerTargetSelection")
     && waitingFor.data.player === playerId;
   const isCopyRetargetForMe = waitingFor?.type === "CopyRetarget" && waitingFor.data.player === playerId;
-  const isTargeting = isHumanTargetSelection || isCopyRetargetForMe;
+  // CR 115.7: A single-target retarget (Bolt Bend) is chosen on the board, so
+  // opponents are legal click targets when they appear in `legal_new_targets`.
+  const isRetargetChoiceForMe = waitingFor?.type === "RetargetChoice"
+    && waitingFor.data.player === playerId
+    && waitingFor.data.scope.type === "Single";
+  const isTargeting = isHumanTargetSelection || isCopyRetargetForMe || isRetargetChoiceForMe;
   const currentLegalTargets = useMemo(() => {
     if (isHumanTargetSelection) {
       return waitingFor.data.selection?.current_legal_targets ?? [];
@@ -140,8 +145,11 @@ export function OpponentHud({ opponentName, onKickPlayer }: OpponentHudProps) {
       const slot = waitingFor.data.target_slots[waitingFor.data.current_slot ?? 0];
       return slot?.legal_alternatives ?? [];
     }
+    if (isRetargetChoiceForMe) {
+      return waitingFor.data.legal_new_targets;
+    }
     return [];
-  }, [isHumanTargetSelection, isCopyRetargetForMe, waitingFor]);
+  }, [isHumanTargetSelection, isCopyRetargetForMe, isRetargetChoiceForMe, waitingFor]);
   const validPlayerTargetIds = useMemo(
     () => currentLegalTargets
       .filter((tgt): tgt is { Player: number } => "Player" in tgt)
