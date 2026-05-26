@@ -12,7 +12,7 @@ export type { AiSeatConfig };
 export type HostSettings = HostingSettings;
 
 interface HostSetupProps {
-  onHost: (settings: HostSettings) => void;
+  onHost: (settings: HostSettings) => void | Promise<boolean>;
   onBack: () => void;
   connectionMode: "server" | "p2p";
   /** When true, the host-submit button is disabled (e.g. live deck check
@@ -66,6 +66,7 @@ export function HostSetup({
   // player-name field to avoid the two-inputs-for-one-value confusion.
   const displayName = useMultiplayerStore((s) => s.displayName);
   const setFormatConfig = useMultiplayerStore((s) => s.setFormatConfig);
+  const hostingStatus = useMultiplayerStore((s) => s.hostingStatus);
 
   // Seed the format picker from whatever the user last selected (persisted
   // in the store). This means navigating away and back to host-setup keeps
@@ -87,6 +88,7 @@ export function HostSetup({
   const [matchType, setMatchType] = useState<MatchType>("Bo1");
   const [aiSeats, setAiSeats] = useState<AiSeatConfig[]>([]);
   const [startWhenFull, setStartWhenFull] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Mirror the in-flight format to the store on every change so sibling
   // views (the deck picker shown when the user clicks "Change Deck" out
@@ -149,7 +151,9 @@ export function HostSetup({
     );
   };
 
-  const handleHost = () => {
+  const handleHost = async () => {
+    if (isSubmitting || hostingStatus !== "idle") return;
+    setIsSubmitting(true);
     // `finalConfig` is the submission payload — `max_players` here is the
     // user's chosen count, not the format ceiling. Do NOT mirror this
     // into the store: the store tracks the format's invariants (so the
@@ -167,17 +171,25 @@ export function HostSetup({
         : displayName
           ? `${displayName}'s table`
           : null;
-    onHost({
-      displayName,
-      public: isPublic,
-      password: showPassword ? password : "",
-      timerSeconds: null,
-      formatConfig: finalConfig,
-      matchType: playerCount === 2 ? matchType : "Bo1",
-      aiSeats,
-      startWhenFull,
-      roomName: resolvedRoomName,
-    });
+    try {
+      const ok = await onHost({
+        displayName,
+        public: isPublic,
+        password: showPassword ? password : "",
+        timerSeconds: null,
+        formatConfig: finalConfig,
+        matchType: playerCount === 2 ? matchType : "Bo1",
+        aiSeats,
+        startWhenFull,
+        roomName: resolvedRoomName,
+      });
+      if (ok !== false) return;
+    } catch {
+      // The parent surfaces the specific failure as a toast/dialog.
+    }
+    if (hostingStatus === "idle") {
+      setIsSubmitting(false);
+    }
   };
 
   // Filter formats: P2P supports 2-4 peers via WebRTC mesh, so any format
@@ -192,7 +204,7 @@ export function HostSetup({
 
   return (
     <form
-      onSubmit={(e) => { e.preventDefault(); handleHost(); }}
+      onSubmit={(e) => { e.preventDefault(); void handleHost(); }}
       className="relative z-10 flex w-full max-w-xl flex-col items-center gap-6"
     >
       <MenuPanel className="flex w-full flex-col gap-6">
@@ -554,12 +566,16 @@ export function HostSetup({
           </button>
           <button
             type="submit"
-            disabled={hostDisabled}
+            disabled={hostDisabled || isSubmitting || hostingStatus !== "idle"}
             title={hostDisabled ? hostDisabledReason : undefined}
-            aria-disabled={hostDisabled || undefined}
+            aria-disabled={hostDisabled || isSubmitting || hostingStatus !== "idle" || undefined}
             className={`${menuButtonClass({ tone: accentTone, size: "md" })} disabled:cursor-not-allowed disabled:opacity-50`}
           >
-            {isP2P ? t("hostSetup.hostP2PGame") : t("hostSetup.hostGame")}
+            {isSubmitting || hostingStatus !== "idle"
+              ? t("hostSetup.opening")
+              : isP2P
+                ? t("hostSetup.hostP2PGame")
+                : t("hostSetup.hostGame")}
           </button>
         </div>
       </MenuPanel>

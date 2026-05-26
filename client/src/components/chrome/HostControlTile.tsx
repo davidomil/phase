@@ -297,8 +297,7 @@ export function HostControlTile() {
 
   return (
     <div
-      className="fixed right-3 z-30 w-72"
-      style={{ top: "calc(env(titlebar-area-height, 0px) + 0.75rem)" }}
+      className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+4.75rem)] z-40 sm:left-auto sm:right-3 sm:top-[calc(env(titlebar-area-height,0px)+0.75rem)] sm:w-72"
     >
       <div className="rounded-xl border border-white/10 bg-black/70 shadow-lg shadow-black/40 backdrop-blur-md">
         {/* Header */}
