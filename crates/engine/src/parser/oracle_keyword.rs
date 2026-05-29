@@ -886,6 +886,24 @@ pub(crate) fn parse_keyword_from_oracle(text: &str) -> Option<Keyword> {
         }
     }
 
+    // CR 702.77a: Reinforce N—{cost} — "[Cost], Discard this card: Put N +1/+1 counters
+    // on target creature." Same N—{cost} format as Suspend/Awaken.
+    // Uses parse_number_or_x to handle "Reinforce X—{cost}" (e.g. Swell of Courage).
+    if let Ok((rest, _)) = tag::<_, _, OracleError<'_>>("reinforce ").parse(text) {
+        if let Ok((after_count, count)) = nom_primitives::parse_number_or_x.parse(rest.trim()) {
+            let cost_str = after_count
+                .strip_prefix('\u{2014}') // allow-noncombinator: em-dash punctuation separator
+                .or_else(|| after_count.strip_prefix("\u{2014}")) // allow-noncombinator: em-dash variant
+                .or_else(|| after_count.strip_prefix("--")) // allow-noncombinator: ascii dash fallback
+                .unwrap_or(after_count)
+                .trim();
+            if !cost_str.is_empty() {
+                let cost = crate::database::mtgjson::parse_mtgjson_mana_cost(cost_str);
+                return Some(Keyword::Reinforce { count, cost });
+            }
+        }
+    }
+
     // CR 702.60a: Ripple N — when you cast this spell, you may reveal the top N cards
     // of your library and cast any with the same name without paying their mana cost.
     // Keyword::Ripple is currently a unit variant (N is not yet tracked by the engine).
@@ -1151,10 +1169,16 @@ pub fn keyword_display_name(keyword: &Keyword) -> String {
         Keyword::Increment => "increment".to_string(),
         Keyword::Specialize(_) => "specialize".to_string(),
         Keyword::Offering(quality) => format!("{} offering", quality.to_lowercase()),
+        Keyword::Reinforce { count, .. } => {
+            if *count == 0 {
+                "reinforce x".to_string()
+            } else {
+                format!("reinforce {count}")
+            }
+        }
         Keyword::Unknown(s) => s.to_lowercase(),
     }
 }
-
 /// CR 702.24a: Render a cumulative-upkeep base cost as the display fragment
 /// used after `cumulative upkeep — `. Only the four cost shapes the
 /// cumulative-upkeep parser actually emits are handled (`Mana`, `PayLife`,
