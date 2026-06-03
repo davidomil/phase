@@ -2163,16 +2163,26 @@ fn try_parse_set_life_total(
     become_text: &str,
     application: &SubjectApplication,
 ) -> Option<ParsedEffectClause> {
-    let lower = become_text.to_lowercase();
+    let full_lower = become_text.to_lowercase();
+    // CR 119.5: "life total becomes equal to <quantity>" — strip the optional
+    // "equal to" connector via a nom combinator so the quantity parser below
+    // sees the bare quantity ("equal to your starting life total" → "your
+    // starting life total"; Oketra's Last Mercy, Resolute Archangel). Forms
+    // without the connector ("becomes half ...", "becomes 10") pass through
+    // unchanged because `opt` never fails.
+    let lower = opt(tag::<_, _, OracleError<'_>>("equal to "))
+        .parse(full_lower.as_str())
+        .map_or(full_lower.as_str(), |(rest, _)| rest)
+        .trim();
 
-    let amount = if nom_primitives::scan_contains(&lower, "starting life total") {
+    let amount = if nom_primitives::scan_contains(lower, "starting life total") {
         let amount_text = lower.trim().trim_end_matches('.');
         let (rest, amount) = nom_quantity::parse_quantity(amount_text).ok()?;
         if !rest.trim().is_empty() {
             return None;
         }
         amount
-    } else if let Some((n, rest)) = parse_number(&lower) {
+    } else if let Some((n, rest)) = parse_number(lower) {
         // Guard: reject if substantial text remains after the number.
         // "a 3/3 red goblin creature" matches "a" as 1 but the rest
         // "3/3 red goblin creature" indicates this is an animation, not
@@ -2190,7 +2200,7 @@ fn try_parse_set_life_total(
         // "life total becomes <quantity>" card composes. `parse_cda_quantity`
         // returns `Some` only when it fully consumes the phrase, so an
         // unrecognized trailer yields `None` here — no false positives.
-        oracle_quantity::parse_cda_quantity(&lower)?
+        oracle_quantity::parse_cda_quantity(lower)?
     };
 
     // CR 119.5: Use the parsed target if targeted ("target player's life total"),
@@ -3136,6 +3146,33 @@ mod tests {
             "expected TakeTheInitiative, got {:?}",
             ability.effect
         );
+    }
+
+    #[test]
+    fn set_life_total_becomes_equal_to_starting_life_total() {
+        for (text, expected) in [
+            (
+                // Oketra's Last Mercy, Resolute Archangel.
+                "Your life total becomes equal to your starting life total.",
+                QuantityExpr::Ref {
+                    qty: QuantityRef::StartingLifeTotal,
+                },
+            ),
+            (
+                "Your life total becomes equal to 10.",
+                QuantityExpr::Fixed { value: 10 },
+            ),
+        ] {
+            let ability =
+                crate::parser::oracle_effect::parse_effect_chain(text, AbilityKind::Spell);
+            let Effect::SetLifeTotal { amount, .. } = &*ability.effect else {
+                panic!(
+                    "expected SetLifeTotal for {text:?}, got {:?}",
+                    ability.effect
+                );
+            };
+            assert_eq!(amount, &expected, "wrong amount for {text:?}");
+        }
     }
 
     #[test]
