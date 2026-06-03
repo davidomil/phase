@@ -887,6 +887,8 @@ pub enum StaticMode {
     Goaded,
     CantAttackAlone,
     CantBlockAlone,
+    /// CR 702.122c: This creature can't crew Vehicles.
+    CantCrew,
     MayLookAtTopOfLibrary,
 
     // -- Tier 3: Parser-produced statics --
@@ -1292,6 +1294,7 @@ impl fmt::Display for StaticMode {
             StaticMode::Goaded => write!(f, "Goaded"),
             StaticMode::CantAttackAlone => write!(f, "CantAttackAlone"),
             StaticMode::CantBlockAlone => write!(f, "CantBlockAlone"),
+            StaticMode::CantCrew => write!(f, "CantCrew"),
             StaticMode::MayLookAtTopOfLibrary => write!(f, "MayLookAtTopOfLibrary"),
             // Tier 3
             StaticMode::MayChooseNotToUntap => write!(f, "MayChooseNotToUntap"),
@@ -1595,6 +1598,7 @@ impl FromStr for StaticMode {
             "Goaded" => StaticMode::Goaded,
             "CantAttackAlone" => StaticMode::CantAttackAlone,
             "CantBlockAlone" => StaticMode::CantBlockAlone,
+            "CantCrew" => StaticMode::CantCrew,
             "MayLookAtTopOfLibrary" => StaticMode::MayLookAtTopOfLibrary,
             // Tier 3
             "MayChooseNotToUntap" => StaticMode::MayChooseNotToUntap,
@@ -1998,6 +2002,7 @@ mod tests {
             StaticMode::MustBeBlocked,
             StaticMode::CantAttackAlone,
             StaticMode::CantBlockAlone,
+            StaticMode::CantCrew,
             StaticMode::MayLookAtTopOfLibrary,
             // Tier 3: parser-produced statics
             StaticMode::MayChooseNotToUntap,

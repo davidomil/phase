@@ -10838,6 +10838,38 @@ fn cant_be_activated_compound_aura_mana_exemption_suffix() {
 }
 
 #[test]
+fn cant_be_activated_compound_aura_with_cant_crew() {
+    let defs = parse_static_line_multi(
+        "Enchanted permanent can't attack, block, crew Vehicles, or have its activated abilities activated.",
+    );
+    let modes: Vec<&StaticMode> = defs.iter().map(|def| &def.mode).collect();
+
+    assert!(
+        modes.contains(&&StaticMode::CantAttack),
+        "compound Aura text should emit CantAttack"
+    );
+    assert!(
+        modes.contains(&&StaticMode::CantBlock),
+        "compound Aura text should emit CantBlock"
+    );
+    assert!(
+        modes.contains(&&StaticMode::CantCrew),
+        "compound Aura text should emit CantCrew"
+    );
+    assert!(
+        defs.iter()
+            .any(|def| matches!(def.mode, StaticMode::CantBeActivated { .. })),
+        "compound Aura text should emit CantBeActivated"
+    );
+    assert!(defs.iter().all(|def| {
+        def.affected
+            == Some(TargetFilter::Typed(
+                TypedFilter::permanent().properties(vec![FilterProp::EnchantedBy]),
+            ))
+    }));
+}
+
+#[test]
 fn cant_be_activated_clarion_multi_type_filter() {
     // CR 602.5 + CR 603.2a: Clarion Conqueror — "Activated abilities of artifacts,
     // creatures, and planeswalkers your opponents control can't be activated."
