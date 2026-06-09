@@ -15264,6 +15264,7 @@ mod tests {
                     zone: ZoneRef::Library,
                     card_types: Vec::new(),
                     scope: crate::types::ability::CountScope::Controller,
+                    filter: None,
                 },
             },
         };

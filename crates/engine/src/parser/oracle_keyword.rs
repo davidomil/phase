@@ -2808,6 +2808,7 @@ mod tests {
                         zone,
                         card_types,
                         scope,
+                        filter: None,
                     },
             }) => {
                 assert_eq!(*zone, ZoneRef::Graveyard);

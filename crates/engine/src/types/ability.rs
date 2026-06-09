@@ -3405,6 +3405,8 @@ pub enum QuantityRef {
     ZoneCardCount {
         zone: ZoneRef,
         card_types: Vec<TypeFilter>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<TargetFilter>,
         scope: CountScope,
     },
     /// CR 305.6: Count distinct basic land types (Plains/Island/Swamp/Mountain/Forest)

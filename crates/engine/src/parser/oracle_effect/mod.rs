@@ -13499,6 +13499,7 @@ fn rewrite_player_scope_refs(def: &mut AbilityDefinition) {
                             zone: zone.clone(),
                             card_types: Vec::new(),
                             scope: crate::types::ability::CountScope::ScopedPlayer,
+                            filter: None,
                         };
                     }
                     // Exile has no clean controller-scoped equivalent in the
@@ -13612,6 +13613,7 @@ pub(crate) fn rewrite_player_quantity_refs_to_source_chosen(def: &mut AbilityDef
                             zone: zone.clone(),
                             card_types: Vec::new(),
                             scope: CountScope::SourceChosenPlayer,
+                            filter: None,
                         };
                     }
                     ZoneRef::Exile => {}
@@ -13672,6 +13674,7 @@ pub(crate) fn rewrite_event_player_quantity_refs_to_scoped(def: &mut AbilityDefi
                             zone: zone.clone(),
                             card_types: Vec::new(),
                             scope: CountScope::ScopedPlayer,
+                            filter: None,
                         };
                     }
                     // No scoped-player equivalent for exile counts; leave as-is.
@@ -18986,6 +18989,7 @@ mod tests {
                             zone,
                             card_types,
                             scope,
+                            filter: None,
                         },
                 },
             comparator: Comparator::GE,
@@ -19142,6 +19146,7 @@ mod tests {
                                 zone: ZoneRef::Graveyard,
                                 card_types,
                                 scope: CountScope::Controller,
+                                filter: None,
                             },
                     },
             } => assert_eq!(card_types, &vec![TypeFilter::Creature]),
@@ -35931,7 +35936,8 @@ mod tests {
                             zone: ZoneRef::Graveyard,
                             ref card_types,
                             scope: CountScope::Controller,
-                        },
+                            filter: None,
+                        }
                     },
                     comparator: Comparator::GE,
                     rhs: QuantityExpr::Fixed { value: 7 },
