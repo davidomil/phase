@@ -30001,6 +30001,90 @@ mod tests {
     }
 
     #[test]
+    fn parse_reveal_a_card_from_your_hand_sets_any_card_filter() {
+        let def = parse_effect_chain("Reveal a card from your hand.", AbilityKind::Spell);
+
+        let Effect::RevealHand {
+            target,
+            card_filter,
+            ..
+        } = &*def.effect
+        else {
+            panic!("Expected RevealHand, got {:?}", def.effect);
+        };
+        assert_eq!(*target, TargetFilter::Controller);
+        assert_eq!(
+            *card_filter,
+            TargetFilter::Any,
+            "singular hand reveal must let the player choose any hand card"
+        );
+    }
+
+    #[test]
+    fn parse_reveal_a_card_from_target_opponents_hand_preserves_hand_owner() {
+        let def = parse_effect_chain(
+            "Reveal a card from target opponent's hand.",
+            AbilityKind::Spell,
+        );
+
+        let Effect::RevealHand {
+            target,
+            card_filter,
+            ..
+        } = &*def.effect
+        else {
+            panic!("Expected RevealHand, got {:?}", def.effect);
+        };
+        assert!(matches!(
+            target,
+            TargetFilter::Typed(tf)
+                if tf.controller == Some(crate::types::ability::ControllerRef::Opponent)
+        ));
+        assert_eq!(*card_filter, TargetFilter::Any);
+    }
+
+    #[test]
+    fn parse_eladamri_hand_mode_reveal_sets_any_card_filter() {
+        let def = parse_effect_chain(
+            "Reveal a card from your hand. If it's a creature card, you may put it onto the battlefield.",
+            AbilityKind::Activated,
+        );
+
+        let Effect::RevealHand {
+            target,
+            card_filter,
+            ..
+        } = &*def.effect
+        else {
+            panic!("Expected RevealHand, got {:?}", def.effect);
+        };
+        assert_eq!(*target, TargetFilter::Controller);
+        assert_eq!(*card_filter, TargetFilter::Any);
+    }
+
+    #[test]
+    fn parse_reveal_creature_card_from_your_hand_sets_creature_filter() {
+        let def = parse_effect_chain("Reveal a creature card from your hand.", AbilityKind::Spell);
+
+        let Effect::RevealHand {
+            target,
+            card_filter,
+            ..
+        } = &*def.effect
+        else {
+            panic!("Expected RevealHand, got {:?}", def.effect);
+        };
+        assert_eq!(*target, TargetFilter::Controller);
+        assert!(
+            matches!(
+                card_filter,
+                TargetFilter::Typed(tf) if tf.type_filters.contains(&TypeFilter::Creature)
+            ),
+            "typed singular hand reveal must preserve the card filter, got {card_filter:?}"
+        );
+    }
+
+    #[test]
     fn reveal_hand_all_nonland_then_choose_one_preserves_reveal_filter() {
         let def = parse_effect_chain(
             "Target opponent reveals all nonland cards in their hand. You may choose one of those cards. If you do, that player exiles it.",
