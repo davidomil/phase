@@ -489,6 +489,7 @@ fn redundancy_delta(
         | Effect::GiveControl { .. }
         | Effect::RemoveFromCombat { .. }
         | Effect::Conjure { .. }
+        | Effect::Intensify { .. }
         | Effect::DraftFromSpellbook { .. }
         | Effect::Tribute { .. }
         | Effect::Unimplemented { .. }

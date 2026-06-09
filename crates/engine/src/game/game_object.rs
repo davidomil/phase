@@ -337,6 +337,14 @@ pub struct GameObject {
     #[serde(with = "counter_map_serde")]
     pub counters: HashMap<CounterType, u32>,
 
+    /// Alchemy Intensity — a per-card escalating value (digital-only, no CR
+    /// entry). Initialized from the card's "Starting intensity N" at first
+    /// characteristic application and incremented by `Effect::Intensify`. Like
+    /// `counters`, it persists across zone changes (the object keeps its id), so
+    /// a card's intensity follows it through hand/library/stack/battlefield.
+    #[serde(default)]
+    pub intensity: u32,
+
     // Characteristics
     pub name: String,
     pub power: Option<i32>,
@@ -982,6 +990,7 @@ impl GameObject {
             paired_with: None,
             pair_controller: None,
             counters: HashMap::new(),
+            intensity: 0,
             name: name.clone(),
             power: None,
             toughness: None,

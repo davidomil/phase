@@ -1369,6 +1369,7 @@ pub fn keyword_display_name(keyword: &Keyword) -> String {
         Keyword::Wither => "wither".to_string(),
         Keyword::Infect => "infect".to_string(),
         Keyword::Afflict(n) => format!("afflict {n}"),
+        Keyword::StartingIntensity(n) => format!("starting intensity {n}"),
         Keyword::Prowess => "prowess".to_string(),
         Keyword::Undying => "undying".to_string(),
         Keyword::Persist => "persist".to_string(),
