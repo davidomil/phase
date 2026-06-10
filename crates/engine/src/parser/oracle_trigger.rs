@@ -3246,7 +3246,11 @@ fn try_extract_that_players_turn(
             value(false, tag(" is")),
         )),
         opt(tag(" not")),
-        tag(" that player's turn"),
+        alt((
+            tag(" that player's turn"),
+            // CR 603.4: Glademuse — "if it's not their turn" (pronoun = triggering player).
+            tag(" their turn"),
+        )),
     )
         .parse(tail)
         .ok()?;
@@ -24027,6 +24031,25 @@ mod tests {
                 }),
             }),
             "Price of Glory must gate on it NOT being the tapping player's turn"
+        );
+    }
+
+    #[test]
+    fn glademuse_attaches_not_their_turn_intervening_if() {
+        // Issue #873: "their" refers to the casting player, same as "that player's".
+        let def = parse_trigger_line(
+            "Whenever a player casts a spell, if it's not their turn, that player draws a card.",
+            "Glademuse",
+        );
+        assert_eq!(def.mode, TriggerMode::SpellCast);
+        assert_eq!(
+            def.condition,
+            Some(TriggerCondition::Not {
+                condition: Box::new(TriggerCondition::DuringPlayersTurn {
+                    player: PlayerFilter::TriggeringPlayer,
+                }),
+            }),
+            "Glademuse must only trigger off-turn for the casting player"
         );
     }
 
