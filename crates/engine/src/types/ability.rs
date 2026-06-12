@@ -13632,6 +13632,18 @@ pub enum ContinuousModification {
     GrantAbility {
         definition: Box<AbilityDefinition>,
     },
+    /// CR 613.1f + CR 113.3: Grant the affected object **all activated abilities
+    /// of** the objects matching `source` (Myr Welder / Dark Impostor / Patchwork
+    /// Crawler "all [creature] cards exiled with it", Territory Forge "the exiled
+    /// card", Mairsil, Experiment Kraj, …). The set is dynamic — recomputed each
+    /// layer pass — so it is expanded into one `GrantAbility` per matching
+    /// activated ability at continuous-effect collection time
+    /// (`active_continuous_effects_from_static_definitions`); the layer-6 apply of
+    /// this variant itself is therefore a no-op. `source` is resolved relative to
+    /// each recipient of the host static (`FilterContext::from_source(recipient)`).
+    GrantAllActivatedAbilitiesOf {
+        source: TargetFilter,
+    },
     /// CR 604.1: Grant a triggered ability to the affected object.
     /// Unlike GrantAbility (which pushes to obj.abilities), this pushes to
     /// obj.trigger_definitions so the trigger's event/condition metadata is

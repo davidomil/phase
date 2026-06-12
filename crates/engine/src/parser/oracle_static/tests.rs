@@ -4565,6 +4565,36 @@ fn parse_continuous_modifications_are_goaded_emits_goaded_static_mode() {
     )));
 }
 
+/// CR 613.1f + CR 113.3: "all activated abilities of all cards exiled with it" /
+/// "the exiled card" → `GrantAllActivatedAbilitiesOf { ExiledBySource }` (Myr
+/// Welder, Territory Forge). Issue #3101.
+#[test]
+fn parse_continuous_modifications_grants_all_activated_abilities_of_exiled() {
+    use crate::types::ability::TargetFilter;
+    for predicate in [
+        "all activated abilities of all cards exiled with it",
+        "all activated abilities of all cards exiled with ~",
+        "all activated abilities of the exiled card",
+    ] {
+        let mods = parse_continuous_modifications(predicate);
+        assert_eq!(
+            mods,
+            vec![ContinuousModification::GrantAllActivatedAbilitiesOf {
+                source: TargetFilter::ExiledBySource
+            }],
+            "predicate: {predicate}"
+        );
+    }
+    // Typed/counter/battlefield forms stay a gap (no modification) for now.
+    assert!(
+        parse_continuous_modifications(
+            "all activated abilities of all creature cards exiled with it"
+        )
+        .is_empty(),
+        "typed 'creature cards exiled with it' must stay a gap (follow-up)"
+    );
+}
+
 #[test]
 fn static_pump_must_be_blocked_and_goaded_emits_all_defs() {
     let defs = parse_static_line_multi(
