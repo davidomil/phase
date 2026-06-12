@@ -27,7 +27,9 @@ use crate::types::card_type::{
 use crate::types::counter::{has_positive_counters, CounterType};
 #[cfg(test)]
 use crate::types::game_state::MayTriggerOrigin;
-use crate::types::game_state::{DayNight, GameState, LayersDirty, StaticGateKey};
+use crate::types::game_state::{
+    DayNight, GameState, LayersDirty, StaticGateKey, TransientContinuousEffect,
+};
 use crate::types::identifiers::ObjectId;
 use crate::types::keywords::Keyword;
 #[cfg(test)]
@@ -2498,11 +2500,8 @@ pub(crate) fn gather_transient_continuous_effects(
             continue;
         }
 
-        // CR 611.2b: ForAsLongAs durations embed a condition that must hold each layer cycle.
-        if let Duration::ForAsLongAs { ref condition } = tce.duration {
-            if !evaluate_condition(state, condition, tce.controller, tce.source_id) {
-                continue;
-            }
+        if !transient_duration_holds(state, tce) {
+            continue;
         }
 
         let retained_condition = if let Some(condition) = &tce.condition {
@@ -2533,6 +2532,24 @@ pub(crate) fn gather_transient_continuous_effects(
                 characteristic_defining: false,
             });
         }
+    }
+}
+
+fn transient_duration_holds(state: &GameState, tce: &TransientContinuousEffect) -> bool {
+    let Duration::ForAsLongAs { ref condition } = tce.duration else {
+        return true;
+    };
+
+    // CR 611.2b: A recipient-referential condition ("for as long as IT has a
+    // shield counter" — Shield Broker's gain-control) refers to the object the
+    // effect applies to, not the source. For a single-object effect that object
+    // is the affected `SpecificObject`; evaluate against it so the duration
+    // tracks the controlled/granted creature's counters rather than the source.
+    match (&tce.affected, condition_uses_recipient_context(condition)) {
+        (TargetFilter::SpecificObject { id }, true) => {
+            evaluate_condition_with_recipient(state, condition, tce.controller, tce.source_id, *id)
+        }
+        _ => evaluate_condition(state, condition, tce.controller, tce.source_id),
     }
 }
 
@@ -2758,10 +2775,8 @@ fn collect_transient_combat_assignment_rule_effects(
             continue;
         }
 
-        if let Duration::ForAsLongAs { ref condition } = tce.duration {
-            if !evaluate_condition(state, condition, tce.controller, tce.source_id) {
-                continue;
-            }
+        if !transient_duration_holds(state, tce) {
+            continue;
         }
 
         let retained_condition = if let Some(condition) = &tce.condition {

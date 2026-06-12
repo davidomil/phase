@@ -33570,7 +33570,7 @@ mod tests {
             matches!(
                 dur,
                 Some(Duration::ForAsLongAs {
-                    condition: StaticCondition::HasCounters {
+                    condition: StaticCondition::RecipientHasCounters {
                         counters: crate::types::counter::CounterMatch::OfType(
                             crate::types::counter::CounterType::Generic(ref name)
                         ),
