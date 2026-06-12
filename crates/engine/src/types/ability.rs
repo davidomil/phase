@@ -16,7 +16,7 @@ use super::game_state::{
 };
 use super::identifiers::{ObjectId, TrackedSetId};
 use super::keywords::{Keyword, KeywordKind};
-use super::mana::{ManaColor, ManaCost, ManaType};
+use super::mana::{AbilityActivationScope, ManaColor, ManaCost, ManaType};
 use super::phase::Phase;
 use super::player::{PlayerCounterKind, PlayerId};
 use super::replacements::ReplacementEvent;
@@ -1367,10 +1367,14 @@ pub enum ManaSpendRestriction {
     /// "Spend this mana only to cast a creature spell of the chosen type."
     /// Resolved at runtime from the source's `chosen_creature_type()`.
     ChosenCreatureType,
-    /// CR 106.12: "Spend this mana only to cast creature spells or activate abilities of creatures."
-    /// Combined restriction with OR semantics: allowed for spells of the type OR ability
-    /// activations on permanents of the type. The `String` is the card type (e.g., "Creature").
-    SpellTypeOrAbilityActivation(String),
+    /// CR 106.6: "Spend this mana only to cast creature spells or activate abilities of creatures."
+    /// Combined restriction with OR semantics: allowed for spells of `spell_type` OR ability
+    /// activations described by `ability` — `OfSpellType` restricts to abilities of permanents
+    /// of `spell_type`, `Any` permits any ability ("… or to activate an ability").
+    SpellTypeOrAbilityActivation {
+        spell_type: String,
+        ability: AbilityActivationScope,
+    },
     /// "Spend this mana only to activate abilities."
     /// Cannot be used to cast spells; only for ability activation costs.
     ActivateOnly,

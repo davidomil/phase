@@ -13296,9 +13296,10 @@ mod tests {
         );
         assert_eq!(
             result.map(|(r, _)| r),
-            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation(
-                "Colorless Eldrazi".to_string()
-            ))
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Colorless Eldrazi".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::OfSpellType,
+            })
         );
     }
 
@@ -13309,9 +13310,10 @@ mod tests {
         );
         assert_eq!(
             result.map(|(r, _)| r),
-            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation(
-                "Artifact".to_string()
-            ))
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Artifact".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::OfSpellType,
+            })
         );
     }
 
@@ -13322,18 +13324,74 @@ mod tests {
         );
         assert_eq!(
             result.map(|(r, _)| r),
-            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation(
-                "Assassin".to_string()
-            ))
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Assassin".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::OfSpellType,
+            })
+        );
+    }
+
+    /// CR 106.6: a bare "… or (to) activate an ability" suffix (no type qualifier)
+    /// permits casting the named spell type OR activating *any* ability — the
+    /// generic `AbilityActivationScope::Any` form (Sage of the Unknowable, Purple
+    /// Dragon Punks, Guidelight Optimizer).
+    #[test]
+    fn mana_spend_restriction_bare_activation_or_is_any_ability() {
+        let result = crate::parser::oracle_effect::mana::parse_mana_spend_restriction(
+            "spend this mana only to cast an artifact spell or activate an ability",
+        );
+        assert_eq!(
+            result.map(|(r, _)| r),
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Artifact".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::Any,
+            })
+        );
+    }
+
+    /// CR 106.6: Sage of the Unknowable — "Spend this mana only to cast a
+    /// colorless spell or to activate an ability." The "or **to** activate an
+    /// ability" suffix is the generic any-ability form.
+    #[test]
+    fn mana_spend_restriction_colorless_or_to_activate_any_ability() {
+        let result = crate::parser::oracle_effect::mana::parse_mana_spend_restriction(
+            "spend this mana only to cast a colorless spell or to activate an ability",
+        );
+        assert_eq!(
+            result.map(|(r, _)| r),
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Colorless".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::Any,
+            })
         );
     }
 
     #[test]
-    fn mana_spend_restriction_bare_activation_or_is_unsupported() {
+    fn mana_spend_restriction_any_activation_tail_preserves_inner_or_spell_type() {
         let result = crate::parser::oracle_effect::mana::parse_mana_spend_restriction(
-            "spend this mana only to cast an artifact spell or activate an ability",
+            "spend this mana only to cast an instant or sorcery spell or activate an ability",
         );
-        assert_eq!(result, None);
+        assert_eq!(
+            result.map(|(r, _)| r),
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Instant or Sorcery".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::Any,
+            })
+        );
+    }
+
+    #[test]
+    fn mana_spend_restriction_any_activation_tail_accepts_to_activate_plural() {
+        let result = crate::parser::oracle_effect::mana::parse_mana_spend_restriction(
+            "spend this mana only to cast artifact spells or to activate abilities",
+        );
+        assert_eq!(
+            result.map(|(r, _)| r),
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Artifact".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::Any,
+            })
+        );
     }
 
     #[test]
@@ -13343,9 +13401,10 @@ mod tests {
         );
         assert_eq!(
             result.map(|(r, _)| r),
-            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation(
-                "Ally".to_string()
-            ))
+            Some(ManaSpendRestriction::SpellTypeOrAbilityActivation {
+                spell_type: "Ally".to_string(),
+                ability: crate::types::mana::AbilityActivationScope::OfSpellType,
+            })
         );
     }
 
