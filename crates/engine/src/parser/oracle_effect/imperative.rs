@@ -99,6 +99,16 @@ fn parse_dig_library_owner(rest_lower: &str) -> TargetFilter {
         return TargetFilter::ParentTarget;
     }
 
+    if preceded(
+        take_until::<_, _, OracleError<'_>>("that opponent's library"),
+        tag::<_, _, OracleError<'_>>("that opponent's library"),
+    )
+    .parse(rest_lower)
+    .is_ok()
+    {
+        return TargetFilter::ParentTarget;
+    }
+
     // CR 608.2c + CR 400.3: "that library" — anaphoric to a library
     // identified earlier in the instruction (Chaos Warp: owner's library
     // after shuffle).
@@ -1937,6 +1947,7 @@ pub(super) fn parse_search_and_creation_ast(
     if let Some((reveal, rest)) = nom_on_lower(text, lower, |input| {
         alt((
             value(false, tag("look at the top ")),
+            value(false, tag("looks at the top ")),
             value(true, tag("reveal the top ")),
             value(true, tag("reveals the top ")),
         ))
@@ -1956,10 +1967,28 @@ pub(super) fn parse_search_and_creation_ast(
         } else {
             QuantityExpr::Fixed { value: 1 }
         };
+        let player = parse_dig_library_owner(rest_lower);
+        // CR 701.20e + CR 701.13a + CR 406.3: "look at the top card ... and
+        // exiles it face down" (Gonti, Night Minister) — fuse into ExileTop so
+        // the card leaves the library and the trailing play grant can bind to
+        // the tracked set.
+        if preceded(
+            take_until::<_, _, OracleError<'_>>("and exiles it face down"),
+            tag::<_, _, OracleError<'_>>("and exiles it face down"),
+        )
+        .parse(rest_lower)
+        .is_ok()
+        {
+            return Some(SearchCreationImperativeAst::ExileTopLookedAt {
+                player,
+                count,
+                face_down: true,
+            });
+        }
         return Some(SearchCreationImperativeAst::Dig {
             count,
             reveal,
-            player: parse_dig_library_owner(rest_lower),
+            player,
         });
     }
     // CR 701.16a: "look at that many cards from the top of your library" — variable-count dig
@@ -2242,6 +2271,15 @@ pub(super) fn lower_search_and_creation_ast(ast: SearchCreationImperativeAst) ->
             rest_destination: None,
             reveal,
             enter_tapped: false,
+        },
+        SearchCreationImperativeAst::ExileTopLookedAt {
+            player,
+            count,
+            face_down,
+        } => Effect::ExileTop {
+            player,
+            count,
+            face_down,
         },
         SearchCreationImperativeAst::CopyTokenOf {
             target,
