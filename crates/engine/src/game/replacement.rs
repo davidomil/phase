@@ -10562,6 +10562,43 @@ mod tests {
         assert_eq!(amount, 6);
     }
 
+    /// CR 614.1a: Bloodletter only doubles during the source controller's turn.
+    #[test]
+    fn bloodletter_does_not_double_on_opponents_turn() {
+        let bloodletter = ObjectId(10);
+        let repl = {
+            let mut repl = ReplacementDefinition::new(ReplacementEvent::LoseLife)
+                .quantity_modification(QuantityModification::Double);
+            repl.valid_player = Some(ReplacementPlayerScope::Opponent);
+            repl
+        };
+
+        let mut state = GameState::new_two_player(42);
+        state.active_player = PlayerId(1);
+        let mut card = GameObject::new(
+            bloodletter,
+            CardId(1),
+            PlayerId(0),
+            "Bloodletter of Aclazotz".to_string(),
+            Zone::Battlefield,
+        );
+        card.replacement_definitions = vec![repl].into();
+        state.objects.insert(bloodletter, card);
+        state.battlefield.push_back(bloodletter);
+
+        let proposed = ProposedEvent::LifeLoss {
+            player_id: PlayerId(1),
+            amount: 3,
+            applied: HashSet::new(),
+        };
+        let mut events = Vec::new();
+        let result = replace_event(&mut state, proposed, &mut events);
+        let ReplacementResult::Execute(ProposedEvent::LifeLoss { amount, .. }) = result else {
+            panic!("expected LifeLoss passthrough, got {:?}", result);
+        };
+        assert_eq!(amount, 3);
+    }
+
     /// CR 616.1: Mixed `Double` and `Plus` quantity modifications do NOT commute
     /// and should trigger a CR 616.1 ordering prompt. Doubling Season (`Double`)
     /// and Hardened Scales (`Plus{1}`) on a counter placement must prompt the player.
