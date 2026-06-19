@@ -1269,6 +1269,7 @@ pub fn evaluate_layers(state: &mut GameState) {
     // taken by AI search or snapshot diffing retain their own roots, so this
     // does not break structural sharing across `GameState` clones.
     state.attribution.clear();
+    let mut abilities_suppressed = HashSet::new();
     // CR 702.26b + CR 702.26e: Phased-out permanents are treated as though
     // they do not exist and are not included in continuous-effect affected
     // sets. Exclude them from the whole layer pass so the reset/apply invariant
@@ -1369,7 +1370,7 @@ pub fn evaluate_layers(state: &mut GameState) {
     let copy_effects = gather_active_effects_for_layer(state, Layer::Copy);
     let ordered_copy = order_active_continuous_effects(Layer::Copy, &copy_effects, state);
     for effect in &ordered_copy {
-        apply_continuous_effect(state, effect);
+        apply_continuous_effect(state, effect, &mut abilities_suppressed);
     }
 
     // Step 3: Gather active continuous effects after layer 1 is applied.
@@ -1392,7 +1393,7 @@ pub fn evaluate_layers(state: &mut GameState) {
             };
 
             for effect in &ordered {
-                apply_continuous_effect(state, effect);
+                apply_continuous_effect(state, effect, &mut abilities_suppressed);
             }
         }
 
@@ -1985,6 +1986,7 @@ fn incremental_recipient_ids(
 /// just the entered objects yields a board identical to a full pass (CR 613.1).
 fn apply_layers_incremental(state: &mut GameState, entered_ids: &HashSet<ObjectId>) {
     let recipient_ids = incremental_recipient_ids(state, entered_ids);
+    let mut abilities_suppressed = HashSet::new();
     // Step 1 (per-entered subset): reset computed characteristics to base.
     for &id in &recipient_ids {
         if let Some(obj) = state.objects.get_mut(&id) {
@@ -2027,7 +2029,7 @@ fn apply_layers_incremental(state: &mut GameState, entered_ids: &HashSet<ObjectI
     let copy_effects = gather_active_effects_for_layer(state, Layer::Copy);
     let ordered_copy = order_active_continuous_effects(Layer::Copy, &copy_effects, state);
     for effect in &ordered_copy {
-        apply_continuous_effect_to(state, effect, &recipient_ids);
+        apply_continuous_effect_to(state, effect, &recipient_ids, &mut abilities_suppressed);
     }
 
     // Step 3-4: Remaining layers in order, restricted to recipient objects.
@@ -2044,7 +2046,12 @@ fn apply_layers_incremental(state: &mut GameState, entered_ids: &HashSet<ObjectI
                 order_by_timestamp(&layer_effects)
             };
             for effect in &ordered {
-                apply_continuous_effect_to(state, effect, &recipient_ids);
+                apply_continuous_effect_to(
+                    state,
+                    effect,
+                    &recipient_ids,
+                    &mut abilities_suppressed,
+                );
             }
         }
         // CR 613.1f: mirror the full-pass end-of-Layer-6 denial hook for the
@@ -3443,8 +3450,12 @@ fn modification_dynamic_quantity(m: &ContinuousModification) -> Option<&Quantity
     }
 }
 
-fn apply_continuous_effect(state: &mut GameState, effect: &ActiveContinuousEffect) {
-    apply_continuous_effect_filtered(state, effect, None);
+fn apply_continuous_effect(
+    state: &mut GameState,
+    effect: &ActiveContinuousEffect,
+    abilities_suppressed: &mut HashSet<ObjectId>,
+) {
+    apply_continuous_effect_filtered(state, effect, None, abilities_suppressed);
 }
 
 /// Apply a continuous effect's modification only to the subset of its affected
@@ -3459,15 +3470,24 @@ fn apply_continuous_effect_to(
     state: &mut GameState,
     effect: &ActiveContinuousEffect,
     restrict_to: &HashSet<ObjectId>,
+    abilities_suppressed: &mut HashSet<ObjectId>,
 ) {
-    apply_continuous_effect_filtered(state, effect, Some(restrict_to));
+    apply_continuous_effect_filtered(state, effect, Some(restrict_to), abilities_suppressed);
 }
 
 fn apply_continuous_effect_filtered(
     state: &mut GameState,
     effect: &ActiveContinuousEffect,
     restrict_to: Option<&HashSet<ObjectId>>,
+    abilities_suppressed: &mut HashSet<ObjectId>,
 ) {
+    // CR 613.1f: A printed static on an object that lost all abilities this
+    // pass must not re-apply in later layers (Death's Shadow CDA after
+    // Abigale — issue #1321).
+    if effect.def_index.is_some() && abilities_suppressed.contains(&effect.source_id) {
+        return;
+    }
+
     let scan_zone = effect
         .affected_filter
         .extract_in_zone()
@@ -3889,6 +3909,7 @@ fn apply_continuous_effect_filtered(
                 obj.replacement_definitions.clear();
                 obj.static_definitions.clear();
                 obj.keywords.clear();
+                abilities_suppressed.insert(id);
             }
             ContinuousModification::AddType { core_type } => {
                 if !obj.card_types.core_types.contains(core_type) {
@@ -6792,6 +6813,55 @@ mod tests {
         assert!(obj.trigger_definitions.is_empty());
         assert!(obj.replacement_definitions.is_empty());
         assert!(obj.static_definitions.is_empty());
+    }
+
+    /// CR 613.1f (issue #1321): suppression state must be scoped to the current
+    /// layer pass — an incremental flush after a prior full pass that removed
+    /// abilities must not inherit stale suppression and skip self-sourced CDAs.
+    #[test]
+    fn incremental_layer_pass_does_not_inherit_remove_all_abilities_suppression() {
+        let mut state = setup();
+        let bear = make_creature(&mut state, "Bear", 2, 2, PlayerId(0));
+        {
+            let def = StaticDefinition::continuous()
+                .affected(TargetFilter::SelfRef)
+                .modifications(vec![ContinuousModification::AddPower { value: 3 }]);
+            let bear_obj = state.objects.get_mut(&bear).unwrap();
+            bear_obj.static_definitions.push(def.clone());
+            Arc::make_mut(&mut bear_obj.base_static_definitions).push(def);
+        }
+
+        let suppressor = make_creature(&mut state, "Suppressor", 1, 1, PlayerId(0));
+        {
+            let def = StaticDefinition::continuous()
+                .affected(TargetFilter::SpecificObject { id: bear })
+                .modifications(vec![ContinuousModification::RemoveAllAbilities]);
+            state
+                .objects
+                .get_mut(&suppressor)
+                .unwrap()
+                .static_definitions
+                .push(def);
+        }
+
+        evaluate_layers(&mut state);
+        assert_eq!(
+            state.objects.get(&bear).unwrap().power,
+            Some(2),
+            "RemoveAllAbilities must suppress the CDA during the full pass"
+        );
+
+        // Suppressor leaves; only the bear is re-derived incrementally.
+        state.battlefield.retain(|&id| id != suppressor);
+        state.objects.remove(&suppressor);
+        state.layers_dirty = LayersDirty::EnteredObjects([bear].into());
+        flush_layers(&mut state);
+
+        assert_eq!(
+            state.objects.get(&bear).unwrap().power,
+            Some(5),
+            "incremental pass must rebuild suppression locally and re-apply the CDA"
+        );
     }
 
     #[test]
