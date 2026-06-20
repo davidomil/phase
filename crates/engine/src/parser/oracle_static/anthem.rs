@@ -720,11 +720,13 @@ fn rewrite_self_pronoun_subject(condition: &str) -> String {
         nom_tag_lower(&lower, &lower, "it's ").or_else(|| nom_tag_lower(&lower, &lower, "it is "))
     {
         // CR 508.1k / CR 509.1g / CR 509.1h: combat-state pronoun siblings of the
-        // tapped/untapped rewrite. Exact-match only — "attacking alone" keeps its
-        // trailing word and is left for SourceAttackingAlone.
+        // tapped/untapped rewrite. CR 700.9: "modified" is the self-state sibling
+        // for "it's modified" (Obstinate Gargoyle, Skyward Spider). Exact-match
+        // only — "attacking alone" keeps its trailing word and is left for
+        // SourceAttackingAlone; "modified creature" never hits this arm.
         if matches!(
             rest.trim(),
-            "tapped" | "untapped" | "attacking" | "blocking" | "blocked"
+            "tapped" | "untapped" | "attacking" | "blocking" | "blocked" | "modified"
         ) {
             return format!("~ is {}", rest.trim());
         }

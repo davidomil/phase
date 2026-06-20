@@ -18468,6 +18468,78 @@ fn self_pronoun_combat_state_exact_match_excludes_attacking_alone() {
     assert_eq!(buff.condition, Some(StaticCondition::SourceIsAttacking));
 }
 
+#[test]
+fn self_static_resolves_this_creature_is_modified_to_source_filter() {
+    // CR 700.9 / CR 611.3a: "as long as this creature is modified" (Orochi
+    // Merge-Keeper) must type to SourceMatchesFilter on a creature filter carrying
+    // FilterProp::Modified — NOT Unrecognized (which evals always-true, leaving the
+    // granted mana ability on even when unmodified). Discriminating: before EDIT 1
+    // this came back StaticCondition::Unrecognized. Fails on revert.
+    let defs = parse_static_line_multi(
+        "As long as this creature is modified, it has \"{T}: Add {G}{G}.\"",
+    );
+    assert!(!defs.is_empty(), "expected at least one static def");
+    assert!(
+        defs.iter()
+            .all(|d| !matches!(d.condition, Some(StaticCondition::Unrecognized { .. }))),
+        "no def may carry an Unrecognized condition, got {:?}",
+        defs.iter().map(|d| &d.condition).collect::<Vec<_>>()
+    );
+    assert!(
+        defs.iter().any(|d| matches!(
+            &d.condition,
+            Some(StaticCondition::SourceMatchesFilter {
+                filter: TargetFilter::Typed(tf),
+            }) if tf.type_filters.contains(&TypeFilter::Creature)
+                && tf.properties.contains(&FilterProp::Modified)
+        )),
+        "expected SourceMatchesFilter(creature + FilterProp::Modified), got {:?}",
+        defs.iter().map(|d| &d.condition).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn self_static_resolves_it_pronoun_modified_to_source_filter() {
+    // CR 700.9 / CR 611.3a: "as long as it's modified" (Obstinate Gargoyle,
+    // Skyward Spider) — the SelfRef self-pronoun rewrite (EDIT 2) turns "it's
+    // modified" into "~ is modified", which EDIT 1 types to the Modified filter.
+    // Discriminating: before the fix this stayed Unrecognized (always-true). Fails
+    // on revert.
+    let def = parse_static_line("This creature has flying as long as it's modified.")
+        .expect("self static def");
+    assert!(
+        matches!(
+            &def.condition,
+            Some(StaticCondition::SourceMatchesFilter {
+                filter: TargetFilter::Typed(tf),
+            }) if tf.type_filters.contains(&TypeFilter::Creature)
+                && tf.properties.contains(&FilterProp::Modified)
+        ),
+        "expected SourceMatchesFilter(creature + FilterProp::Modified), got {:?}",
+        def.condition
+    );
+}
+
+#[test]
+fn aura_static_does_not_bind_it_pronoun_modified_to_source() {
+    // GUARD (anaphor trap): an Aura's "it" refers to the ENCHANTED creature, not
+    // the Aura source, so "Enchanted creature has flying as long as it's modified"
+    // must NOT collapse to a Source* filter. The ~755 SelfRef guard keeps the
+    // non-SelfRef "it" an honest Unrecognized gap. Proves the rewrite is guarded.
+    let defs = parse_static_line_multi("Enchanted creature has flying as long as it's modified.");
+    assert!(!defs.is_empty(), "expected at least one static def");
+    for d in &defs {
+        assert!(
+            !matches!(
+                d.condition,
+                Some(StaticCondition::SourceMatchesFilter { .. })
+            ),
+            "Aura 'it' must not resolve to a Source filter, got {:?}",
+            d.condition
+        );
+    }
+}
+
 /// CR 702.16p: Benevolent Blessing — "Enchanted creature has protection from the
 /// chosen color. This effect doesn't remove Auras and Equipment you control that
 /// are already attached to it." The trailing inert SBA-exemption sentence must be

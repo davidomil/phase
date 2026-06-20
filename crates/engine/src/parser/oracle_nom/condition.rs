@@ -1130,6 +1130,22 @@ fn parse_source_is_enchanted(input: &str) -> OracleResult<'_, StaticCondition> {
     value(StaticCondition::SourceIsEnchanted, tag("is enchanted")).parse(rest)
 }
 
+/// CR 700.9: "<subject> is modified" → SourceMatchesFilter on a creature filter
+/// carrying FilterProp::Modified (has a counter / is equipped / is enchanted by
+/// the controller's Aura — evaluated by FilterProp::Modified in game/filter.rs).
+/// Reuses SourceMatchesFilter (no new variant); the SelfRef self-static binds the
+/// filter to the source via FilterContext::from_source at layers.rs.
+fn parse_source_is_modified(input: &str) -> OracleResult<'_, StaticCondition> {
+    let (rest, _) = parse_source_subject(input)?;
+    let filter =
+        TargetFilter::Typed(TypedFilter::creature().properties(vec![FilterProp::Modified]));
+    value(
+        StaticCondition::SourceMatchesFilter { filter },
+        tag("is modified"),
+    )
+    .parse(rest)
+}
+
 /// CR 701.37: Parse "<subject> is monstrous" → SourceIsMonstrous.
 fn parse_source_is_monstrous(input: &str) -> OracleResult<'_, StaticCondition> {
     let (rest, _) = parse_source_subject(input)?;
@@ -1213,6 +1229,12 @@ fn parse_source_state_conditions(input: &str) -> OracleResult<'_, StaticConditio
         // "is enchanted by N Auras" (which requires `tag("is enchanted by ")`)
         // still wins; this arm only matches the no-quantifier idiom.
         parse_source_is_enchanted,
+        // CR 700.9: bare "~ is modified" / "this creature is modified" →
+        // SourceMatchesFilter(creature + FilterProp::Modified). Placed after the
+        // enchanted arms (its tag "is modified" shares no prefix with them) and
+        // before the generic `parse_source_is_type` so the specific predicate wins
+        // over "is <type>" dispatch.
+        parse_source_is_modified,
         // CR 122.1: "<subject> has <quantity> <counter_type> counter(s) on it"
         // — covers Unleash/Outlast/Renown bodies, Primordial Hydra's trample gate,
         // and every "as long as it has …" counter-comparator static.
@@ -7991,6 +8013,42 @@ mod tests {
         };
         assert_eq!(comparator, Comparator::EQ);
         assert_eq!(rhs, QuantityExpr::Fixed { value: 2 });
+    }
+
+    // CR 700.9: "is modified" predicate → SourceMatchesFilter(creature +
+    // FilterProp::Modified). Discriminating (fail-on-revert): without the
+    // `parse_source_is_modified` arm "~ is modified" falls through to
+    // `Unrecognized` (always-true), re-breaking Orochi Merge-Keeper / Obstinate
+    // Gargoyle / Skyward Spider. Also a no-regression guard: the equipped/enchanted
+    // siblings must still type to their own dedicated conditions, untouched.
+    #[test]
+    fn test_source_is_modified() {
+        for subj in ["~ is modified", "this creature is modified"] {
+            let (rest, c) = parse_inner_condition(subj).unwrap();
+            assert_eq!(rest, "", "unexpected remainder for {subj:?}");
+            let StaticCondition::SourceMatchesFilter {
+                filter: TargetFilter::Typed(tf),
+            } = c
+            else {
+                panic!("expected SourceMatchesFilter(Typed) for {subj:?}, got {c:?}");
+            };
+            assert!(
+                tf.type_filters.contains(&TypeFilter::Creature),
+                "expected Creature type filter, got {tf:?}"
+            );
+            assert!(
+                tf.properties.contains(&FilterProp::Modified),
+                "expected FilterProp::Modified, got {tf:?}"
+            );
+        }
+
+        // No-regression: equipped/enchanted keep their own dedicated conditions.
+        let (rest, c) = parse_inner_condition("~ is equipped").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(c, StaticCondition::SourceIsEquipped);
+        let (rest, c) = parse_inner_condition("~ is enchanted").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(c, StaticCondition::SourceIsEnchanted);
     }
 
     // CR 701.37: SourceIsMonstrous predicate across subjects.
