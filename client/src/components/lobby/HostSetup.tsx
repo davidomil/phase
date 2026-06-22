@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { FormatConfig, FormatGroup, GameFormat, MatchType } from "../../adapter/types";
+import { AI_DIFFICULTIES } from "../../constants/ai";
 import { FORMAT_REGISTRY } from "../../data/formatRegistry";
 import { FORMAT_DEFAULTS, useMultiplayerStore } from "../../stores/multiplayerStore";
 import type { AiSeatConfig, HostingSettings } from "../../stores/multiplayerStore";
@@ -9,7 +10,6 @@ import { useAiDeckCatalog } from "../../services/aiDeckCatalog";
 import { expandParsedDeck } from "../../services/deckParser";
 import { menuButtonClass } from "../menu/buttonStyles";
 import { MenuSelect, type MenuSelectGroup } from "../ui/MenuSelect";
-import { SelectField } from "../ui/SelectField";
 
 export type { AiSeatConfig };
 export type HostSettings = HostingSettings;
@@ -46,7 +46,6 @@ const GROUP_ORDER: Record<FormatGroup, number> = {
   Multiplayer: 3,
 };
 
-const DIFFICULTY_OPTIONS = ["VeryEasy", "Easy", "Medium", "Hard", "VeryHard"];
 const FFA_DECK_SIZE_OPTIONS = [60, 40] as const;
 
 /** P2P uses a hub-and-spoke topology (see `p2p-adapter.ts` `P2PHostAdapter`):
@@ -164,7 +163,7 @@ export function HostSetup({
   hostDisabled = false,
   hostDisabledReason,
 }: HostSetupProps) {
-  const { t } = useTranslation("multiplayer");
+  const { t } = useTranslation(["multiplayer", "menu"]);
   // Player name is edited in `PlayerIdentityBanner` above this form (see
   // MultiplayerPage). We read it here only to submit it and to seed the
   // room-name placeholder — this form itself intentionally has no
@@ -386,6 +385,14 @@ export function HostSetup({
     }
     return groups;
   }, [availableFormats]);
+  const difficultyMenuItems = useMemo(
+    () =>
+      AI_DIFFICULTIES.map(({ id }) => ({
+        value: id,
+        label: t(`menu:aiDifficulty.levels.${id}`),
+      })),
+    [t],
+  );
   const submitDisabled =
     hostDisabled || isSubmitting || hostingStatus !== "idle" || (aiSeats.length > 0 && !defaultAiDeck);
 
@@ -611,19 +618,19 @@ export function HostSetup({
                         {aiSeat ? t("hostSetup.ai") : t("hostSetup.human")}
                       </button>
                       {aiSeat ? (
-                        <SelectField
-                          chevronSize="sm"
-                          wrapperClassName="ml-auto"
-                          value={aiSeat.difficulty}
-                          onChange={(e) => setAiDifficulty(seatIndex, e.target.value)}
-                          className="rounded-[8px] border border-hairline bg-black/30 px-1.5 py-1 text-[11px] text-white outline-none"
-                        >
-                          {DIFFICULTY_OPTIONS.map((d) => (
-                            <option key={d} value={d} className="bg-[#0a0f1b] text-slate-100">
-                              {d}
-                            </option>
-                          ))}
-                        </SelectField>
+                        <MenuSelect
+                          ariaLabel={t("menu:aiDifficulty.label")}
+                          label={
+                            difficultyMenuItems.find((item) => item.value === aiSeat.difficulty)?.label ??
+                            t(`menu:aiDifficulty.levels.${aiSeat.difficulty}`)
+                          }
+                          selectedValue={aiSeat.difficulty}
+                          items={difficultyMenuItems}
+                          onSelect={(value) => setAiDifficulty(seatIndex, value)}
+                          menuLayout="dropdown"
+                          wrapperClassName="ml-auto min-w-0"
+                          className="rounded-[8px] border border-hairline bg-black/30 px-1.5 py-1 text-[11px] font-medium text-white"
+                        />
                       ) : (
                         <span className="ml-auto text-[11px] text-fg-meta">{t("hostSetup.waitingForPlayer")}</span>
                       )}
