@@ -2115,6 +2115,9 @@ fn effect_details(effect: &Effect) -> Vec<(String, String)> {
                 Some(CounteredSpellDestination::Library {
                     position: LibraryPosition::NthFromTop { n },
                 }) => d.push(("redirect".into(), format!("library #{n} from top"))),
+                Some(CounteredSpellDestination::Library {
+                    position: LibraryPosition::BeneathTop { .. },
+                }) => d.push(("redirect".into(), "library beneath top X".into())),
                 Some(CounteredSpellDestination::Hand) => {
                     d.push(("redirect".into(), "hand".into()))
                 }

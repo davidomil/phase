@@ -257,12 +257,20 @@ pub fn resolve(
         &collected_targets[..collected_targets.len().min(expected)]
     };
 
-    let index = match position {
+    let index = match &position {
         // Top = index 0, Bottom = None (push to end), NthFromTop = index n-1
         // ("second from the top" = index 1).
         LibraryPosition::Top => Some(0),
         LibraryPosition::Bottom => None,
         LibraryPosition::NthFromTop { n } => Some(n.saturating_sub(1) as usize),
+        // CR 401.7 (Unexpectedly Absent class): "just beneath the top N cards"
+        // leaves exactly `depth` cards above the placed object, i.e. the 0-based
+        // insertion index IS the resolved depth (no `-1`, unlike `NthFromTop`).
+        // Per CR 401.7 `move_to_library_at_index` clamps an index past the
+        // library size to the bottom.
+        LibraryPosition::BeneathTop { depth } => {
+            Some(resolve_quantity_with_targets(state, depth, ability).max(0) as usize)
+        }
     };
     match position {
         LibraryPosition::Top => {
@@ -270,7 +278,9 @@ pub fn resolve(
                 zones::move_to_library_at_index(state, *object_id, index, events);
             }
         }
-        LibraryPosition::Bottom | LibraryPosition::NthFromTop { .. } => {
+        LibraryPosition::Bottom
+        | LibraryPosition::NthFromTop { .. }
+        | LibraryPosition::BeneathTop { .. } => {
             for object_id in to_place {
                 zones::move_to_library_at_index(state, *object_id, index, events);
             }

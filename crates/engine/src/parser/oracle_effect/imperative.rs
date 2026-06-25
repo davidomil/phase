@@ -4909,6 +4909,21 @@ pub(super) fn parse_put_ast(
         return Some(PutImperativeAst::BottomOfLibrary);
     }
 
+    // CR 401.7 (Unexpectedly Absent): "into its owner's library just beneath
+    // the top X cards of that library" — the placed permanent ends with exactly
+    // the named number of cards above it. The bare "X" is the spell's announced
+    // {X}, resolved at resolution time. The "where X is ..." rebinding forms
+    // (Quarry Colossus's Plains count, the die-roll cards) carry their own count
+    // source and stay out of scope, so a present "where x is" clause is skipped.
+    if take_until::<_, _, OracleError<'_>>("where x is")
+        .parse(lower)
+        .is_err()
+    {
+        if let Some(depth) = parse_beneath_top_depth(lower) {
+            return Some(PutImperativeAst::BeneathTop { depth });
+        }
+    }
+
     // "put X into Y's library Nth from the top" —
     // specific positional placement (God-Eternals, Approach, Bury in Books).
     if let Ok((_, before_from)) = take_until::<_, _, OracleError<'_>>("from the top").parse(lower) {
@@ -5006,6 +5021,38 @@ pub(super) fn parse_put_ast(
     }
 
     None
+}
+
+/// Extract the depth N from a "...beneath the top N cards..." clause (CR
+/// 401.7). The bare "X" form resolves to the spell's announced `{X}` via
+/// `QuantityRef::Variable { name: "X" }`; an explicit integer yields a literal.
+/// Any other phrasing returns `None` so the clause falls through unchanged.
+fn parse_beneath_top_depth(lower: &str) -> Option<QuantityExpr> {
+    // Combinator scan to the depth token: "...beneath the top <DEPTH> cards...".
+    let (rest, _) = take_until::<_, _, OracleError<'_>>("beneath the top ")
+        .parse(lower)
+        .ok()?;
+    let (_, depth_token) = preceded(
+        tag::<_, _, OracleError<'_>>("beneath the top "),
+        take_until::<_, _, OracleError<'_>>(" cards"),
+    )
+    .parse(rest)
+    .ok()?;
+    // `all_consuming` keeps the bare "X" / literal-integer arms from matching a
+    // longer token (e.g. "xenagos") — the whole depth token must be the count.
+    all_consuming(alt((
+        map(tag::<_, _, OracleError<'_>>("x"), |_| QuantityExpr::Ref {
+            qty: QuantityRef::Variable {
+                name: "X".to_string(),
+            },
+        }),
+        map(nom::character::complete::i32, |value| QuantityExpr::Fixed {
+            value,
+        }),
+    )))
+    .parse(depth_token)
+    .ok()
+    .map(|(_, expr)| expr)
 }
 
 pub(super) fn lower_put_ast(ast: PutImperativeAst) -> Effect {
@@ -5125,6 +5172,11 @@ pub(super) fn lower_put_ast(ast: PutImperativeAst) -> Effect {
             target: TargetFilter::Any,
             count: QuantityExpr::Fixed { value: 1 },
             position: LibraryPosition::NthFromTop { n },
+        },
+        PutImperativeAst::BeneathTop { depth } => Effect::PutAtLibraryPosition {
+            target: TargetFilter::Any,
+            count: QuantityExpr::Fixed { value: 1 },
+            position: LibraryPosition::BeneathTop { depth },
         },
         PutImperativeAst::PutTopCardsIntoHandMatchingExileCount => Effect::Mill {
             count: QuantityExpr::Ref {

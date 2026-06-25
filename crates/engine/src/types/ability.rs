@@ -7278,6 +7278,15 @@ pub enum LibraryPosition {
     NthFromTop {
         n: u32,
     },
+    /// CR 401.7: "just beneath the top N cards of that library" (Unexpectedly
+    /// Absent class), where N is resolved at resolution time — e.g. the spell's
+    /// announced `{X}`. The object is inserted at the 0-based index equal to the
+    /// resolved depth, i.e. with exactly `depth` cards left above it. Per CR
+    /// 401.7 a depth at or beyond the library size puts the card on the bottom
+    /// (clamped in `move_to_library_at_index`).
+    BeneathTop {
+        depth: QuantityExpr,
+    },
 }
 
 /// CR 701.20a + CR 608.2c: How the *set* of matching cards found by an

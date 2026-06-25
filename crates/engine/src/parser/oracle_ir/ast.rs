@@ -1184,6 +1184,14 @@ pub(crate) enum PutImperativeAst {
     NthFromTop {
         n: u32,
     },
+    /// CR 401.7 (Unexpectedly Absent class): "into its owner's library just
+    /// beneath the top N cards of that library." The placed object ends with
+    /// exactly `depth` cards above it (0-based insertion index = resolved
+    /// `depth`). `depth` is a `QuantityExpr` so the count can be the spell's
+    /// announced `{X}` resolved at resolution time.
+    BeneathTop {
+        depth: QuantityExpr,
+    },
     /// CR 121.5: "put that many cards from the top of your library into your
     /// hand" moves library cards without drawing them (Scroll Rack).
     PutTopCardsIntoHandMatchingExileCount,

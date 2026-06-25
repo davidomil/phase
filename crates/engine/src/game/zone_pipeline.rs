@@ -602,6 +602,17 @@ pub(crate) fn move_object(
                     // CR: `NthFromTop { n }` is 1-based ("second from the top" =>
                     // n=2, index 1); `move_to_library_at_index` is 0-based.
                     LibraryPosition::NthFromTop { n } => Some(n.saturating_sub(1) as usize),
+                    // CR 401.7: "beneath the top N cards" is only produced by the
+                    // `PutAtLibraryPosition` resolver, which moves directly and never
+                    // routes through this rebuilt-tail path. Handled for exhaustiveness:
+                    // a literal depth is honored (0-based index), a runtime-resolved
+                    // depth cannot be evaluated without the originating ability here.
+                    LibraryPosition::BeneathTop { depth } => match depth {
+                        crate::types::ability::QuantityExpr::Fixed { value } => {
+                            Some(value.max(0) as usize)
+                        }
+                        _ => None,
+                    },
                 };
                 zones::move_to_library_at_index(state, req.object_id, index, events);
                 return ZoneMoveResult::Done;
@@ -1601,6 +1612,16 @@ pub(crate) fn deliver_replaced_zone_change(
                     // CR: `NthFromTop { n }` is 1-based ("second from the top"
                     // => n=2, index 1); `move_to_library_at_index` is 0-based.
                     LibraryPosition::NthFromTop { n } => Some(n.saturating_sub(1) as usize),
+                    // CR 401.7: "beneath the top N cards" only flows from the
+                    // `PutAtLibraryPosition` resolver (direct move), never this
+                    // path. Exhaustiveness arm: honor a literal depth; a
+                    // runtime-resolved depth needs the originating ability.
+                    LibraryPosition::BeneathTop { depth } => match depth {
+                        crate::types::ability::QuantityExpr::Fixed { value } => {
+                            Some((*value).max(0) as usize)
+                        }
+                        _ => None,
+                    },
                 };
                 zones::move_to_library_at_index(state, object_id, index, events);
             }
