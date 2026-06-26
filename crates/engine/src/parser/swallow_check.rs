@@ -4075,6 +4075,34 @@ mod tests {
         }
     }
 
+    /// CR 701.20a + CR 604.3: Reveal-until chosen-type and shares-a-type filters
+    /// must parse without any swallowed-clause warnings (Riptide Shapeshifter,
+    /// Heirloom Blade).
+    #[test]
+    fn reveal_until_chosen_type_and_shares_type_do_not_swallow() {
+        for (oracle, name, types) in [
+            (
+                "Reveal cards from the top of your library until you reveal a creature card of the chosen type. Put that card onto the battlefield and the rest on the bottom of your library in a random order.",
+                "Riptide Shapeshifter",
+                &["Creature"][..],
+            ),
+            (
+                "Whenever equipped creature dies, reveal cards from the top of your library until you reveal a creature card that shares a creature type with it, then you may put that card into your hand and the rest on the bottom of your library in a random order.",
+                "Heirloom Blade",
+                &["Artifact"][..],
+            ),
+        ] {
+            let parsed = parse_named(oracle, name, types);
+            assert!(
+                parsed.parse_warnings.iter().all(|warning| {
+                    !matches!(warning, OracleDiagnostic::SwallowedClause { .. })
+                }),
+                "{name} must not trigger any swallowed clause warnings: {:?}",
+                parsed.parse_warnings
+            );
+        }
+    }
+
     /// CR 115.7d: Standalone retarget spells (Deflecting Swat, Redirect) lower
     /// to `ChangeTargets { scope: All }` with the full `you may choose new
     /// targets` surface preserved — not `def.optional`.

@@ -77,7 +77,7 @@ use super::oracle_quantity::{
 };
 use super::oracle_target::{
     parse_event_context_ref, parse_target, parse_target_with_ctx, parse_target_with_syntax,
-    parse_type_phrase, TargetSyntax,
+    parse_type_phrase, parse_type_phrase_with_ctx, TargetSyntax,
 };
 use super::oracle_util::{
     contains_possessive, has_unconsumed_conditional, parse_count_expr, parse_mana_symbols,
@@ -7720,6 +7720,11 @@ fn parse_reveal_until_active_filter_text(input: &str) -> OracleResult<'_, &str> 
     // form) is tried before singular " card" so "permanent cards" strips the full
     // noun, not "permanent" + a stray "s".
     alt((
+        // CR 701.20a + CR 608.2c: chained continuation after the until-filter
+        // ("…creature card that shares a creature type with it, then you may…"
+        // — Heirloom Blade). Stop before ", then" so the shares-type tail
+        // reaches `build_reveal_until_filter` intact.
+        terminated(take_until(", then"), tag(", then")),
         all_consuming(terminated(
             take_until(" cards"),
             (tag(" cards"), opt(tag("."))),
@@ -7812,9 +7817,69 @@ fn build_reveal_until_disjunct_filter(fragment: &str) -> TargetFilter {
     parsed
 }
 
+/// CR 701.20a + CR 604.3: Reveal-until filter "<core> card[s] of the chosen type".
+fn try_parse_reveal_until_card_of_chosen_creature_type(filter_text: &str) -> Option<TargetFilter> {
+    all_consuming(terminated(
+        tag::<_, _, OracleError<'_>>("creature"),
+        alt((
+            tag(" card of the chosen type"),
+            tag(" cards of the chosen type"),
+            tag(" card of that type"),
+            tag(" cards of that type"),
+            tag(" of the chosen type"),
+            tag(" of that type"),
+        )),
+    ))
+    .parse(filter_text)
+    .ok()?;
+    Some(TargetFilter::Typed(
+        TypedFilter::creature().properties(vec![FilterProp::IsChosenCreatureType]),
+    ))
+}
+
+/// CR 701.20a + CR 603.10a: Reveal-until filter sharing a creature type with "it".
+fn try_parse_reveal_until_shares_creature_type(filter_text: &str) -> Option<TargetFilter> {
+    let mut ctx = ParseContext {
+        subject: Some(TargetFilter::AttachedTo),
+        ..Default::default()
+    };
+    let (filter, rem) = parse_type_phrase_with_ctx(filter_text, &mut ctx);
+    if !rem.trim().is_empty() {
+        return None;
+    }
+    let TargetFilter::Typed(tf) = &filter else {
+        return None;
+    };
+    tf.properties
+        .iter()
+        .any(|p| {
+            matches!(
+                p,
+                FilterProp::SharesQuality {
+                    quality: SharedQuality::CreatureType,
+                    ..
+                }
+            )
+        })
+        .then_some(filter)
+}
+
 /// Build a [`TargetFilter`] from the bare filter phrase extracted from a `RevealUntil`
 /// until-clause (caller has already stripped the article and trailing `" card"` suffix).
 fn build_reveal_until_filter(filter_text: &str) -> TargetFilter {
+    // CR 701.20a + CR 603.10a: "creature card that shares a creature type with it"
+    // (Heirloom Blade, Descendants' Fury). The active-filter tail captures the
+    // whole phrase via the `rest` arm; delegate to the typed-target authority with
+    // AttachedTo as the "it" referent for equipped-creature-dies triggers.
+    if let Some(filter) = try_parse_reveal_until_shares_creature_type(filter_text) {
+        return filter;
+    }
+    // CR 701.20a + CR 604.3: "<type> card of the chosen type" (Riptide Shapeshifter).
+    // The inner " card" delimiter in `parse_reveal_until_active_filter_text` prevents
+    // the chosen-type suffix from reaching `parse_target` intact.
+    if let Some(filter) = try_parse_reveal_until_card_of_chosen_creature_type(filter_text) {
+        return filter;
+    }
     // CR 701.20a: "with the chosen name" — active form (e.g. Abundance)
     if nom_primitives::scan_contains(filter_text, "with the chosen name") {
         return TargetFilter::HasChosenName;
@@ -48814,6 +48879,34 @@ mod tests {
                         .any(|t| matches!(t, TypeFilter::Subtype(s) if s == "Time Lord")),
                     "expected Subtype(\"Time Lord\") in type_filters, got {:?}",
                     tf.type_filters
+                );
+            }
+            other => panic!("expected RevealUntil, got {other:?}"),
+        }
+    }
+
+    /// CR 701.20a + CR 604.3: Riptide Shapeshifter — "until you reveal a creature
+    /// card of the chosen type" must gate on the source's chosen creature type.
+    #[test]
+    fn reveal_until_creature_card_of_chosen_type() {
+        let def = parse_effect_chain(
+            "Reveal cards from the top of your library until you reveal a creature card of the chosen type. Put that card onto the battlefield and the rest on the bottom of your library in a random order.",
+            AbilityKind::Activated,
+        );
+        match &*def.effect {
+            Effect::RevealUntil { filter, .. } => {
+                let TargetFilter::Typed(tf) = filter else {
+                    panic!("expected Typed filter, got {filter:?}");
+                };
+                assert!(
+                    tf.type_filters.contains(&TypeFilter::Creature),
+                    "expected Creature, got {:?}",
+                    tf.type_filters
+                );
+                assert!(
+                    tf.properties.contains(&FilterProp::IsChosenCreatureType),
+                    "expected IsChosenCreatureType, got {:?}",
+                    tf.properties
                 );
             }
             other => panic!("expected RevealUntil, got {other:?}"),
