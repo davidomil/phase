@@ -38,9 +38,9 @@ use crate::types::ability::{
     AbilityCost, AbilityDefinition, AbilityKind, AbilityTag, AttachmentKind,
     AttackersDeclaredCountSubject, CastManaObjectScope, CastManaSpentMetric, CastVariantPaid,
     CoinFlipResult, Comparator, ControllerRef, CounterTriggerFilter, DamageKindFilter,
-    DestinationConstraint, Effect, FilterProp, ObjectScope, OriginConstraint, ParsedCondition,
-    PlayerFilter, PlayerScope, PtStat, PtValueScope, QuantityExpr, QuantityRef, RenownSubject,
-    SacrificeAggregateStat, SacrificeCost, SacrificeRequirement, StaticCondition,
+    DestinationConstraint, DieResultFilter, Effect, FilterProp, ObjectScope, OriginConstraint,
+    ParsedCondition, PlayerFilter, PlayerScope, PtStat, PtValueScope, QuantityExpr, QuantityRef,
+    RenownSubject, SacrificeAggregateStat, SacrificeCost, SacrificeRequirement, StaticCondition,
     TapCreaturesRequirement, TargetFilter, TriggerCondition, TriggerConstraint, TriggerDefinition,
     TypeFilter, TypedFilter, UnlessPayModifier, ZoneChangeClause,
 };
@@ -9167,7 +9167,7 @@ fn try_parse_die_roll_trigger(lower: &str) -> Option<(TriggerMode, TriggerDefini
     .ok()?;
 
     let (rest, valid_target) = parse_die_roll_actor(rest).ok()?;
-    let (rest, (mode, batched, die_sides)) = parse_die_roll_object(rest).ok()?;
+    let (rest, (mode, batched, die_sides, die_result)) = parse_die_roll_object(rest).ok()?;
     if !rest.is_empty() {
         return None;
     }
@@ -9177,6 +9177,7 @@ fn try_parse_die_roll_trigger(lower: &str) -> Option<(TriggerMode, TriggerDefini
     def.valid_target = Some(valid_target);
     def.batched = batched;
     def.die_sides = die_sides;
+    def.die_result = die_result;
     Some((mode, def))
 }
 
@@ -9192,16 +9193,62 @@ fn parse_die_roll_actor(input: &str) -> OracleResult<'_, TargetFilter> {
     .parse(input)
 }
 
-fn parse_die_roll_object(input: &str) -> OracleResult<'_, (TriggerMode, bool, Option<u8>)> {
+fn parse_die_roll_object(
+    input: &str,
+) -> OracleResult<'_, (TriggerMode, bool, Option<u8>, Option<DieResultFilter>)> {
     alt((
         value(
-            (TriggerMode::RolledDie, true, None),
+            (TriggerMode::RolledDie, true, None, None),
             tag("one or more dice"),
         ),
-        value((TriggerMode::RolledDieOnce, false, Some(20)), tag("a d20")),
-        value((TriggerMode::RolledDieOnce, false, None), tag("a die")),
+        value(
+            (TriggerMode::RolledDieOnce, false, Some(20), None),
+            tag("a d20"),
+        ),
+        value(
+            (TriggerMode::RolledDieOnce, false, None, None),
+            tag("a die"),
+        ),
+        // CR 706.2: "a [result]" — single face, disjunction, or GE threshold.
+        // Placed after the literal "a d20"/"a die" arms; `parse_number` declines
+        // on the leading "d" of "d20"/"die", so those arms always win their text.
+        map(parse_die_roll_result, |filter| {
+            (TriggerMode::RolledDieOnce, false, None, Some(filter))
+        }),
     ))
     .parse(input)
+}
+
+/// CR 706.2: "Whenever you roll a [result]" — the rolled-face filter. Tries the
+/// GE threshold ("N or higher"/"N or more") before the disjunction ("N or M")
+/// so the shared "or" keyword is never mis-claimed by the disjunction arm, then
+/// falls back to a single exact face. `u8::try_from` guards the d100 ceiling and
+/// declines (via `oracle_err`) on any face that overflows a single byte.
+fn parse_die_roll_result(input: &str) -> OracleResult<'_, DieResultFilter> {
+    let (rest, _) = tag::<_, _, OracleError<'_>>("a ").parse(input)?;
+    let (rest, first_raw) = nom_primitives::parse_number.parse(rest)?;
+    let first = u8::try_from(first_raw).map_err(|_| oracle_err(input))?;
+
+    // GE threshold special case: "N or higher" / "N or more" → AtLeast(N).
+    if let Ok((rest, _)) =
+        alt((tag::<_, _, OracleError<'_>>(" or higher"), tag(" or more"))).parse(rest)
+    {
+        return Ok((rest, DieResultFilter::AtLeast(first)));
+    }
+
+    // Disjunction: "N or M" → Exact([N, M]).
+    if let Ok((rest, second_raw)) = preceded(
+        tag::<_, _, OracleError<'_>>(" or "),
+        nom_primitives::parse_number,
+    )
+    .parse(rest)
+    {
+        let second = u8::try_from(second_raw).map_err(|_| oracle_err(input))?;
+        return Ok((rest, DieResultFilter::Exact(vec![first, second])));
+    }
+
+    // Single exact face: "N" → Exact([N]).
+    Ok((rest, DieResultFilter::Exact(vec![first])))
 }
 
 /// CR 120.1 + CR 120.3 + CR 603.2: "Whenever a source [you control] deals
@@ -25014,6 +25061,70 @@ mod tests {
         assert_eq!(def.mode, TriggerMode::RolledDieOnce);
         assert_eq!(def.valid_target, Some(TargetFilter::Controller));
         assert_eq!(def.die_sides, Some(20));
+    }
+
+    #[test]
+    fn trigger_rolled_die_result_exact_single() {
+        let def = parse_trigger_line(
+            "Whenever you roll a 1, create a Treasure token.",
+            "Complaints Clerk",
+        );
+        assert_eq!(def.mode, TriggerMode::RolledDieOnce);
+        assert_eq!(def.valid_target, Some(TargetFilter::Controller));
+        assert_eq!(def.die_sides, None);
+        assert_eq!(def.die_result, Some(DieResultFilter::Exact(vec![1])));
+    }
+
+    #[test]
+    fn trigger_rolled_die_result_exact_disjunction() {
+        // Atomwheel Acrobats: "Whenever you roll a 1 or 2, ...".
+        let def = parse_trigger_line(
+            "Whenever you roll a 1 or 2, put that many +1/+1 counters on this creature.",
+            "Atomwheel Acrobats",
+        );
+        assert_eq!(def.mode, TriggerMode::RolledDieOnce);
+        assert_eq!(def.die_result, Some(DieResultFilter::Exact(vec![1, 2])));
+    }
+
+    #[test]
+    fn trigger_rolled_die_result_at_least_higher() {
+        // Monoxa, Midway Manager: "Whenever you roll a 3 or higher, ...".
+        let def = parse_trigger_line(
+            "Whenever you roll a 3 or higher, Monoxa gains first strike until end of turn.",
+            "Monoxa, Midway Manager",
+        );
+        assert_eq!(def.mode, TriggerMode::RolledDieOnce);
+        assert_eq!(def.die_result, Some(DieResultFilter::AtLeast(3)));
+    }
+
+    #[test]
+    fn trigger_rolled_die_result_at_least_more() {
+        // "N or more" is the alternate GE phrasing; folds to AtLeast like "N or higher".
+        let def = parse_trigger_line(
+            "Whenever you roll a 4 or more, draw a card.",
+            "Die Roll GE Phrasing",
+        );
+        assert_eq!(def.mode, TriggerMode::RolledDieOnce);
+        assert_eq!(def.die_result, Some(DieResultFilter::AtLeast(4)));
+    }
+
+    #[test]
+    fn trigger_rolled_die_no_result_filter_is_none() {
+        // Regression: the bare "a die" form classifies as RolledDieOnce with no
+        // result filter, and the batched "one or more dice" form is RolledDie.
+        let single = parse_trigger_line(
+            "Whenever you roll a die, put a +1/+1 counter on ~.",
+            "The Space Family Goblinson",
+        );
+        assert_eq!(single.mode, TriggerMode::RolledDieOnce);
+        assert_eq!(single.die_result, None);
+
+        let batch = parse_trigger_line(
+            "Whenever you roll one or more dice, put a +1/+1 counter on ~.",
+            "Vrondiss, Rage of Ancients",
+        );
+        assert_eq!(batch.mode, TriggerMode::RolledDie);
+        assert_eq!(batch.die_result, None);
     }
 
     #[test]

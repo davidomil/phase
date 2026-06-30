@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::types::ability::{
-    AbilityTag, CoinFlipResult, ControllerRef, DamageKindFilter, DestinationConstraint, EffectKind,
-    OriginConstraint, TargetFilter, TargetRef, TriggerDefinition, TypedFilter,
+    AbilityTag, CoinFlipResult, ControllerRef, DamageKindFilter, DestinationConstraint,
+    DieResultFilter, EffectKind, OriginConstraint, TargetFilter, TargetRef, TriggerDefinition,
+    TypedFilter,
 };
 use crate::types::events::{GameEvent, PlayerActionKind};
 use crate::types::game_state::GameState;
@@ -3646,11 +3647,27 @@ pub(super) fn match_rolled_die(
     state: &GameState,
 ) -> bool {
     if let GameEvent::DieRolled {
-        player_id, sides, ..
+        player_id,
+        sides,
+        result,
     } = event
     {
         if trigger.die_sides.is_some_and(|required| required != *sides) {
             return false;
+        }
+        // CR 706.2: result-face filter. CR 706.7: a planar (non-numeric) roll has
+        // result == None and never satisfies a numeric filter; a None filter is unaffected.
+        if let Some(filter) = &trigger.die_result {
+            let Some(rolled) = *result else {
+                return false;
+            };
+            let ok = match filter {
+                DieResultFilter::Exact(faces) => faces.contains(&rolled),
+                DieResultFilter::AtLeast(min) => rolled >= *min,
+            };
+            if !ok {
+                return false;
+            }
         }
         valid_player_matches(trigger, state, *player_id, source_id)
     } else {
@@ -4818,6 +4835,82 @@ mod tests {
             &trigger,
             source,
             &state,
+        ));
+    }
+
+    #[test]
+    fn rolled_die_matcher_filters_result_face() {
+        let mut state = setup();
+        let source = create_object(
+            &mut state,
+            CardId(3),
+            PlayerId(0),
+            "Complaints Clerk".to_string(),
+            Zone::Battlefield,
+        );
+        let roll = |result: Option<u8>| GameEvent::DieRolled {
+            player_id: PlayerId(0),
+            sides: 6,
+            result,
+        };
+
+        // CR 706.2: Exact([1]) — fires on Some(1), not Some(2).
+        let mut exact_one =
+            make_trigger(TriggerMode::RolledDieOnce).valid_target(TargetFilter::Controller);
+        exact_one.die_result = Some(DieResultFilter::Exact(vec![1]));
+        assert!(match_rolled_die(&roll(Some(1)), &exact_one, source, &state));
+        assert!(!match_rolled_die(
+            &roll(Some(2)),
+            &exact_one,
+            source,
+            &state
+        ));
+
+        // CR 706.2: Exact([1, 2]) — fires on 1 and 2, not 3.
+        let mut exact_disj =
+            make_trigger(TriggerMode::RolledDieOnce).valid_target(TargetFilter::Controller);
+        exact_disj.die_result = Some(DieResultFilter::Exact(vec![1, 2]));
+        assert!(match_rolled_die(
+            &roll(Some(1)),
+            &exact_disj,
+            source,
+            &state
+        ));
+        assert!(match_rolled_die(
+            &roll(Some(2)),
+            &exact_disj,
+            source,
+            &state
+        ));
+        assert!(!match_rolled_die(
+            &roll(Some(3)),
+            &exact_disj,
+            source,
+            &state
+        ));
+
+        // CR 706.2: AtLeast(3) — fires on Some(3)/Some(6), not Some(2).
+        let mut at_least =
+            make_trigger(TriggerMode::RolledDieOnce).valid_target(TargetFilter::Controller);
+        at_least.die_result = Some(DieResultFilter::AtLeast(3));
+        assert!(match_rolled_die(&roll(Some(3)), &at_least, source, &state));
+        assert!(match_rolled_die(&roll(Some(6)), &at_least, source, &state));
+        assert!(!match_rolled_die(&roll(Some(2)), &at_least, source, &state));
+
+        // CR 706.7: a numeric filter never fires on a non-numeric (planar) roll
+        // whose result is None.
+        assert!(!match_rolled_die(&roll(None), &exact_one, source, &state));
+
+        // A None filter is unaffected by a None result (any face, including planar).
+        let none_filter =
+            make_trigger(TriggerMode::RolledDieOnce).valid_target(TargetFilter::Controller);
+        assert_eq!(none_filter.die_result, None);
+        assert!(match_rolled_die(&roll(None), &none_filter, source, &state));
+        assert!(match_rolled_die(
+            &roll(Some(1)),
+            &none_filter,
+            source,
+            &state
         ));
     }
 

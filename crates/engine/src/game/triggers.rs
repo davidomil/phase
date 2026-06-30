@@ -19757,6 +19757,63 @@ pub mod tests {
         );
     }
 
+    /// CR 706.2: A "Whenever you roll a 1" trigger (Complaints Clerk) fires
+    /// when the controller rolls a 1 and does NOT fire on any other face. Drives
+    /// `process_triggers` with a synthetic `DieRolled` event so the result face
+    /// is deterministic; asserts the trigger reaches the stack (or pending target
+    /// selection) only for the matching face. Tests the trigger firing — not the
+    /// token-creation effect.
+    #[test]
+    fn roll_a_one_trigger_fires_only_on_face_one() {
+        let parsed = crate::parser::oracle_trigger::parse_trigger_line(
+            "Whenever you roll a 1, create a 1/1 white Clown Robot artifact creature token.",
+            "Complaints Clerk",
+        );
+        assert_eq!(parsed.mode, TriggerMode::RolledDieOnce);
+
+        let run_case = |rolled: u8| -> bool {
+            let mut state = setup();
+            state.active_player = PlayerId(0);
+
+            let clerk = create_object(
+                &mut state,
+                CardId(1),
+                PlayerId(0),
+                "Complaints Clerk".to_string(),
+                Zone::Battlefield,
+            );
+            state
+                .objects
+                .get_mut(&clerk)
+                .unwrap()
+                .trigger_definitions
+                .push(parsed.clone());
+
+            let events = vec![GameEvent::DieRolled {
+                player_id: PlayerId(0),
+                sides: 6,
+                result: Some(rolled),
+            }];
+            process_triggers(&mut state, &events);
+
+            let on_stack = state.stack.iter().any(|entry| {
+                entry.source_id == clerk
+                    && matches!(entry.kind, StackEntryKind::TriggeredAbility { .. })
+            });
+            let pending = state
+                .pending_trigger
+                .as_ref()
+                .is_some_and(|p| p.source_id == clerk);
+            on_stack || pending
+        };
+
+        assert!(run_case(1), "rolling a 1 must fire the roll-a-1 trigger");
+        assert!(
+            !run_case(2),
+            "rolling a 2 must NOT fire the roll-a-1 trigger"
+        );
+    }
+
     #[test]
     fn arcane_adaptation_vampire_type_change_is_visible_to_etb_trigger_matching() {
         let mut state = setup();
