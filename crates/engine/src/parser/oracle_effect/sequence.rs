@@ -411,6 +411,60 @@ pub(super) fn promote_labeled_card_predicate_choices_for_chosen_kind(def: &mut A
     }
 }
 
+/// CR 701.20b + CR 608.2c: In a reorder-only look instruction ("look at the
+/// top N cards ... put them back in any order"), a later "reveal that card"
+/// refers to the new top card of the library, not to a selected parent target.
+/// Ordinary from-among Dig continuations keep their `ParentTarget` binding.
+pub(super) fn rewrite_reorder_dig_backref_reveal_to_top(def: &mut AbilityDefinition) {
+    if is_reorder_only_library_dig(&def.effect) {
+        if let Some(sub) = def.sub_ability.as_mut() {
+            rewrite_first_transparent_parent_reveal_to_top(sub);
+        }
+    }
+    if let Some(sub) = def.sub_ability.as_mut() {
+        rewrite_reorder_dig_backref_reveal_to_top(sub);
+    }
+    if let Some(else_ability) = def.else_ability.as_mut() {
+        rewrite_reorder_dig_backref_reveal_to_top(else_ability);
+    }
+}
+
+fn is_reorder_only_library_dig(effect: &Effect) -> bool {
+    matches!(
+        effect,
+        Effect::Dig {
+            keep_count: None,
+            destination: Some(Zone::Library),
+            rest_destination: Some(Zone::Library),
+            reveal: false,
+            ..
+        }
+    )
+}
+
+fn rewrite_first_transparent_parent_reveal_to_top(def: &mut AbilityDefinition) -> bool {
+    if matches!(
+        def.effect.as_ref(),
+        Effect::Reveal {
+            target: TargetFilter::ParentTarget
+        }
+    ) {
+        *def.effect = Effect::RevealTop {
+            player: TargetFilter::Controller,
+            count: 1,
+        };
+        return true;
+    }
+
+    if !matches!(def.effect.as_ref(), Effect::Choose { .. } | Effect::NoOp) {
+        return false;
+    }
+
+    def.sub_ability
+        .as_deref_mut()
+        .is_some_and(rewrite_first_transparent_parent_reveal_to_top)
+}
+
 fn is_labeled_card_predicate_choice(effect: &Effect) -> bool {
     matches!(
         effect,

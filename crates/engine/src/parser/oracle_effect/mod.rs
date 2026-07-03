@@ -21456,11 +21456,7 @@ pub fn parse_effect_chain(text: &str, kind: AbilityKind) -> AbilityDefinition {
     }
     let ir = parse_effect_chain_ir(text, kind, &mut ParseContext::default());
     let mut def = lower_effect_chain_ir(&ir);
-    sequence::patch_reveal_until_for_library_category_exile(&mut def);
-    sequence::promote_labeled_card_predicate_choices_for_chosen_kind(&mut def);
-    fold_speed_floor_sentences(&mut def);
-    rewrite_choose_tracked_set_exclusion(&mut def);
-    fold_additional_combat_attacker_restriction(&mut def);
+    finalize_effect_chain(&mut def);
     def
 }
 
@@ -21498,11 +21494,7 @@ pub(crate) fn parse_effect_chain_with_context(
     }
     let ir = parse_effect_chain_ir(text, kind, ctx);
     let mut def = lower_effect_chain_ir(&ir);
-    sequence::patch_reveal_until_for_library_category_exile(&mut def);
-    sequence::promote_labeled_card_predicate_choices_for_chosen_kind(&mut def);
-    fold_speed_floor_sentences(&mut def);
-    rewrite_choose_tracked_set_exclusion(&mut def);
-    fold_additional_combat_attacker_restriction(&mut def);
+    finalize_effect_chain(&mut def);
     def
 }
 
@@ -21590,6 +21582,15 @@ fn try_parse_exile_pile_shuffle_cloak(text: &str, kind: AbilityKind) -> Option<A
     );
     head.sub_ability = Some(Box::new(shuffle));
     Some(head)
+}
+
+pub(crate) fn finalize_effect_chain(def: &mut AbilityDefinition) {
+    sequence::patch_reveal_until_for_library_category_exile(def);
+    sequence::promote_labeled_card_predicate_choices_for_chosen_kind(def);
+    sequence::rewrite_reorder_dig_backref_reveal_to_top(def);
+    fold_speed_floor_sentences(def);
+    rewrite_choose_tracked_set_exclusion(def);
+    fold_additional_combat_attacker_restriction(def);
 }
 
 /// CR 509.1g + CR 506.3e + CR 707.2 + CR 603.7: Mirror Match's whole-card idiom

@@ -343,8 +343,8 @@ pub enum ChoiceType {
         options: Vec<CardPredicateChoice>,
     },
     /// Guess which card predicate the revealed card will match. Used by
-    /// Gollum-style "guessed right" sequences and intentionally resolution-
-    /// scoped rather than persisted on the source card.
+    /// top-card "guessed right" sequences and intentionally resolution-scoped
+    /// rather than persisted on the source card.
     CardPredicateGuess {
         options: Vec<CardPredicateChoice>,
     },
