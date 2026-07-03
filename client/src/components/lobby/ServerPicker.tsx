@@ -118,10 +118,12 @@ export function ServerPicker({ onClose, onApply }: ServerPickerProps) {
                 }
               >
                 <span className="flex min-w-0 items-center gap-2 font-medium">
-                  <ServerFlag
-                    flag={preset.flag}
-                    className="h-3.5 w-auto rounded-[2px] shadow-sm ring-1 ring-black/20"
-                  />
+                  {preset.flag && (
+                    <ServerFlag
+                      flag={preset.flag}
+                      className="h-3.5 w-auto rounded-[2px] shadow-sm ring-1 ring-black/20"
+                    />
+                  )}
                   {preset.label}
                 </span>
                 <span className="min-w-0 truncate pl-2 font-mono text-[10px] text-slate-500">

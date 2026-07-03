@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { formatJoinShare, mixedContentBlockReason, parseJoinCode } from "../serverDetection";
+import {
+  DEFAULT_SERVER,
+  SERVER_PRESETS,
+  formatJoinShare,
+  mixedContentBlockReason,
+  parseJoinCode,
+} from "../serverDetection";
+
+describe("server defaults", () => {
+  it("uses the first server preset as the default multiplayer server", () => {
+    expect(DEFAULT_SERVER).toBe(SERVER_PRESETS[0].url);
+  });
+});
 
 describe("parseJoinCode", () => {
   it("returns just the code when no server address is present", () => {
