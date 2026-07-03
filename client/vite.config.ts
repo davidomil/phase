@@ -84,7 +84,7 @@ function dataFileDefines(mode: string): Record<string, string> {
     __GIT_REPO_URL__: JSON.stringify("https://github.com/phase-rs/phase"),
     __PREVIEW_SITE_URL__: JSON.stringify("https://preview.phase-rs.dev"),
     __DEFAULT_MULTIPLAYER_SERVER_URL__: JSON.stringify(
-      process.env.DEFAULT_MULTIPLAYER_SERVER_URL || OFFICIAL_MULTIPLAYER_SERVER_URL,
+      envVar("DEFAULT_MULTIPLAYER_SERVER_URL") || OFFICIAL_MULTIPLAYER_SERVER_URL,
     ),
     // True only for tagged production releases (release.yml sets RELEASE_BUILD).
     // The staging deploy (deploy.yml) is also a production Vite build, so we
