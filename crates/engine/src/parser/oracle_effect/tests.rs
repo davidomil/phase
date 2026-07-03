@@ -31843,10 +31843,12 @@ fn named_choice_accepts_land_card_name() {
 }
 
 #[test]
-fn named_choice_accepts_secretly_choose_land_or_nonland() {
+fn named_choice_keeps_land_or_nonland_as_generic_label() {
     assert_eq!(
         super::try_parse_named_choice("secretly choose land or nonland"),
-        Some(ChoiceType::LandOrNonlandKind)
+        Some(ChoiceType::Labeled {
+            options: ChoiceType::land_or_nonland_kind_options()
+        })
     );
 }
 

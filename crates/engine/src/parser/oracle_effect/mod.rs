@@ -19077,14 +19077,11 @@ pub(crate) fn try_parse_named_choice(lower: &str) -> Option<ChoiceType> {
         Some(ChoiceType::Keyword { options, count: 1 })
     } else {
         // Generic "X or Y" / "X, Y, or Z" / "W, X, Y, or Z" labeled choice —
-        // must come AFTER all specific patterns above.
-        try_parse_labeled_choice(rest).map(|options| {
-            if options == ChoiceType::land_or_nonland_kind_options() {
-                ChoiceType::LandOrNonlandKind
-            } else {
-                ChoiceType::Labeled { options }
-            }
-        })
+        // must come AFTER all specific patterns above. Keep this helper
+        // presentation-generic; sequence lowering promotes land/nonland labels
+        // only when a later "chosen kind" consumer gives them card-kind
+        // semantics.
+        try_parse_labeled_choice(rest).map(|options| ChoiceType::Labeled { options })
     }
 }
 
@@ -21458,6 +21455,7 @@ pub fn parse_effect_chain(text: &str, kind: AbilityKind) -> AbilityDefinition {
     let ir = parse_effect_chain_ir(text, kind, &mut ParseContext::default());
     let mut def = lower_effect_chain_ir(&ir);
     sequence::patch_reveal_until_for_library_category_exile(&mut def);
+    sequence::promote_labeled_land_nonland_choices_for_chosen_kind(&mut def);
     fold_speed_floor_sentences(&mut def);
     rewrite_choose_tracked_set_exclusion(&mut def);
     fold_additional_combat_attacker_restriction(&mut def);
@@ -21499,6 +21497,7 @@ pub(crate) fn parse_effect_chain_with_context(
     let ir = parse_effect_chain_ir(text, kind, ctx);
     let mut def = lower_effect_chain_ir(&ir);
     sequence::patch_reveal_until_for_library_category_exile(&mut def);
+    sequence::promote_labeled_land_nonland_choices_for_chosen_kind(&mut def);
     fold_speed_floor_sentences(&mut def);
     rewrite_choose_tracked_set_exclusion(&mut def);
     fold_additional_combat_attacker_restriction(&mut def);

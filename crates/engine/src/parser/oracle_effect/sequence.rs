@@ -19,12 +19,12 @@ use crate::parser::oracle_quantity::{
     parse_cda_quantity, parse_for_each_object_filter_clause, parse_quantity_ref,
 };
 use crate::types::ability::{
-    AbilityCondition, AbilityDefinition, AbilityKind, CastingPermission, Chooser,
+    AbilityCondition, AbilityDefinition, AbilityKind, CastingPermission, ChoiceType, Chooser,
     ContinuousModification, ControllerRef, CopyRetargetPermission, CounterSourceRider, DigSource,
-    Duration, Effect, EffectScope, ExcessRecipient, FaceDownBody, FaceDownProfile, LibraryPosition,
-    MultiTargetSpec, PermissionGrantee, PlayerFilter, PtValue, QuantityExpr, QuantityRef,
-    RevealUntilDisposition, SpellStackToGraveyardReplacement, StaticDefinition, TargetChoiceTiming,
-    TargetFilter, TypeFilter, TypedFilter,
+    Duration, Effect, EffectScope, ExcessRecipient, FaceDownBody, FaceDownProfile, FilterProp,
+    LibraryPosition, MultiTargetSpec, PermissionGrantee, PlayerFilter, PtValue, QuantityExpr,
+    QuantityRef, RevealUntilDisposition, SpellStackToGraveyardReplacement, StaticDefinition,
+    TargetChoiceTiming, TargetFilter, TypeFilter, TypedFilter,
 };
 use crate::types::card_type::CoreType;
 use crate::types::counter::CounterType;
@@ -382,6 +382,105 @@ pub(super) fn patch_reveal_until_for_library_category_exile(def: &mut AbilityDef
             *kept_destination = Zone::Library;
             *rest_destination = Zone::Library;
         }
+    }
+}
+
+/// CR 608.2c + CR 205.2a: A bare "choose land or nonland" is an opaque
+/// labeled choice. It becomes a library-card-kind choice only when a later
+/// clause consumes "the chosen kind" through `IsChosenLandOrNonlandKind`.
+pub(super) fn promote_labeled_land_nonland_choices_for_chosen_kind(def: &mut AbilityDefinition) {
+    if let Some(sub) = def.sub_ability.as_mut() {
+        promote_labeled_land_nonland_choices_for_chosen_kind(sub);
+        if is_labeled_land_nonland_choice(&def.effect) && ability_uses_chosen_land_nonland_kind(sub)
+        {
+            if let Effect::Choose {
+                choice_type,
+                persist,
+                ..
+            } = def.effect.as_mut()
+            {
+                *choice_type = ChoiceType::LandOrNonlandKind;
+                *persist = false;
+            }
+        }
+    }
+    if let Some(else_ability) = def.else_ability.as_mut() {
+        promote_labeled_land_nonland_choices_for_chosen_kind(else_ability);
+    }
+}
+
+fn is_labeled_land_nonland_choice(effect: &Effect) -> bool {
+    matches!(
+        effect,
+        Effect::Choose {
+            choice_type: ChoiceType::Labeled { options },
+            ..
+        } if *options == ChoiceType::land_or_nonland_kind_options()
+    )
+}
+
+fn ability_uses_chosen_land_nonland_kind(def: &AbilityDefinition) -> bool {
+    effect_uses_chosen_land_nonland_kind(&def.effect)
+        || def
+            .condition
+            .as_ref()
+            .is_some_and(condition_uses_chosen_land_nonland_kind)
+        || def
+            .sub_ability
+            .as_deref()
+            .is_some_and(ability_uses_chosen_land_nonland_kind)
+        || def
+            .else_ability
+            .as_deref()
+            .is_some_and(ability_uses_chosen_land_nonland_kind)
+}
+
+fn effect_uses_chosen_land_nonland_kind(effect: &Effect) -> bool {
+    match effect {
+        Effect::Dig { filter, .. }
+        | Effect::RevealUntil { filter, .. }
+        | Effect::SearchLibrary { filter, .. }
+        | Effect::Seek { filter, .. } => target_filter_uses_chosen_land_nonland_kind(filter),
+        _ => false,
+    }
+}
+
+fn condition_uses_chosen_land_nonland_kind(condition: &AbilityCondition) -> bool {
+    match condition {
+        AbilityCondition::RevealedHasCardType {
+            additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+            ..
+        } => true,
+        AbilityCondition::TargetMatchesFilter { filter, .. }
+        | AbilityCondition::SourceMatchesFilter { filter }
+        | AbilityCondition::ZoneChangeObjectMatchesFilter { filter, .. }
+        | AbilityCondition::ControllerControlsMatching { filter }
+        | AbilityCondition::ZoneChangedThisWay { filter }
+        | AbilityCondition::CostPaidObjectMatchesFilter { filter } => {
+            target_filter_uses_chosen_land_nonland_kind(filter)
+        }
+        AbilityCondition::Not { condition }
+        | AbilityCondition::ConditionInstead { inner: condition } => {
+            condition_uses_chosen_land_nonland_kind(condition)
+        }
+        AbilityCondition::And { conditions } | AbilityCondition::Or { conditions } => conditions
+            .iter()
+            .any(condition_uses_chosen_land_nonland_kind),
+        _ => false,
+    }
+}
+
+fn target_filter_uses_chosen_land_nonland_kind(filter: &TargetFilter) -> bool {
+    match filter {
+        TargetFilter::Typed(typed) => typed
+            .properties
+            .iter()
+            .any(|property| matches!(property, FilterProp::IsChosenLandOrNonlandKind)),
+        TargetFilter::Not { filter } => target_filter_uses_chosen_land_nonland_kind(filter),
+        TargetFilter::And { filters } | TargetFilter::Or { filters } => filters
+            .iter()
+            .any(target_filter_uses_chosen_land_nonland_kind),
+        _ => false,
     }
 }
 
