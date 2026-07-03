@@ -2177,6 +2177,10 @@ fn starts_bare_and_clause_lower(s: &str) -> bool {
         value((), tag::<_, _, OracleError<'_>>("it doesn't ")),
         value((), tag("it can't ")),
         value((), tag("it cannot ")),
+        value((), tag("~ can't ")),
+        value((), tag("~ cannot ")),
+        value((), tag("this creature can't ")),
+        value((), tag("this creature cannot ")),
         value((), tag("it gains ")),
         value((), tag("it gets ")),
         value((), tag("it has ")),
@@ -9944,6 +9948,10 @@ mod tests {
             "this creature gets +2/+0 until end of turn"
         ));
         assert!(starts_bare_and_clause("~ gets +2/+0 until end of turn"));
+        assert!(starts_bare_and_clause("~ can't be blocked this turn"));
+        assert!(starts_bare_and_clause(
+            "this creature can't be blocked this turn"
+        ));
     }
 
     /// CR 608.2c: Anaphoric back-reference conjuncts. Nalia de'Arnise's third

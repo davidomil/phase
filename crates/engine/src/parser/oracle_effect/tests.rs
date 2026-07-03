@@ -20384,6 +20384,111 @@ fn coiling_oracle_reveal_conditional_with_otherwise() {
             .unwrap();
 }
 
+#[test]
+fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
+    use crate::types::statics::StaticMode;
+
+    fn collect<'a>(ability: &'a AbilityDefinition, out: &mut Vec<&'a AbilityDefinition>) {
+        out.push(ability);
+        if let Some(sub) = ability.sub_ability.as_deref() {
+            collect(sub, out);
+        }
+        if let Some(else_ability) = ability.else_ability.as_deref() {
+            collect(else_ability, out);
+        }
+    }
+
+    let def = parse_effect_chain(
+        "look at the top two cards of your library, put them back in any order, then choose land or nonland. \
+         An opponent guesses whether the top card of your library is the chosen kind. \
+         Reveal that card. \
+         If they guessed right, remove ~ from combat. \
+         Otherwise, you draw a card and ~ can't be blocked this turn.",
+        AbilityKind::Spell,
+    );
+
+    let mut nodes = Vec::new();
+    collect(&def, &mut nodes);
+    assert!(
+        nodes
+            .iter()
+            .all(|node| !matches!(*node.effect, Effect::Unimplemented { .. })),
+        "Gollum chain must not contain Unimplemented nodes: {def:#?}"
+    );
+
+    let opponent_guess = nodes
+        .iter()
+        .find(|node| {
+            node.player_scope == Some(PlayerFilter::Opponent)
+                && matches!(
+                    node.effect.as_ref(),
+                    Effect::Choose {
+                        choice_type: ChoiceType::LandOrNonlandGuess,
+                        ..
+                    }
+                )
+        })
+        .expect("opponent guess should lower to an opponent-scoped land/nonland guess");
+    assert!(
+        matches!(
+            opponent_guess.effect.as_ref(),
+            Effect::Choose {
+                choice_type: ChoiceType::LandOrNonlandGuess,
+                persist: false,
+                ..
+            }
+        ),
+        "opponent guesses need source context for logging, but must not persist a source label"
+    );
+
+    let remove = nodes
+        .iter()
+        .find(|node| {
+            matches!(
+                node.effect.as_ref(),
+                Effect::RemoveFromCombat {
+                    target: TargetFilter::SelfRef
+                }
+            )
+        })
+        .expect("guessed-right branch should remove Gollum from combat");
+    assert_eq!(
+        remove.condition,
+        Some(AbilityCondition::RevealedHasCardType {
+            card_types: vec![],
+            additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+            subtype_filter: None,
+        })
+    );
+
+    let else_branch = remove
+        .else_ability
+        .as_deref()
+        .expect("guessed-wrong branch must attach through Otherwise");
+    assert!(
+        matches!(*else_branch.effect, Effect::Draw { .. }),
+        "otherwise branch should draw a card, got {:?}",
+        else_branch.effect
+    );
+
+    let mut else_nodes = Vec::new();
+    collect(else_branch, &mut else_nodes);
+    assert!(
+        else_nodes.iter().any(|node| {
+            matches!(
+                node.effect.as_ref(),
+                Effect::GenericEffect {
+                    static_abilities,
+                    ..
+                } if static_abilities
+                    .iter()
+                    .any(|static_def| static_def.mode == StaticMode::CantBeBlocked)
+            )
+        }),
+        "otherwise branch should also make Gollum unable to be blocked: {else_branch:#?}"
+    );
+}
+
 /// CR 608.2c + CR 205.3a: "If it's a [subtype], A. Otherwise, B." — the subtype
 /// guard must parse to a non-None condition so the existing if/otherwise lowering
 /// attaches the else-branch. Pre-fix the subtype dropped to `None`, so the
@@ -21735,18 +21840,17 @@ fn choose_land_or_nonland_then_seek_chosen_kind_chain() {
         "Secretly choose land or nonland. Seek a card of the chosen kind.",
         AbilityKind::Spell,
     );
-    // CR 205.2a / CR 614.12c: A Labeled card-type/anchor choice now persists
-    // so later "of the chosen type" / "of the chosen kind" / `ChosenLabelIs`
-    // references can read it back from the source's `chosen_attributes`.
+    // CR 205.2a: The transient library-kind choice writes `last_named_choice`
+    // for the following "chosen kind" clause without rendering a lasting
+    // source-card label.
     let Effect::Choose {
-        choice_type: ChoiceType::Labeled { options },
-        persist: true,
+        choice_type: ChoiceType::LandOrNonlandKind,
+        persist: false,
         ..
     } = *def.effect
     else {
         panic!("Expected Choose land/nonland, got {:?}", def.effect);
     };
-    assert_eq!(options, vec!["Land".to_string(), "Nonland".to_string()]);
 
     let seek = def.sub_ability.expect("expected seek continuation");
     let Effect::Seek { filter, count, .. } = *seek.effect else {
@@ -31742,9 +31846,7 @@ fn named_choice_accepts_land_card_name() {
 fn named_choice_accepts_secretly_choose_land_or_nonland() {
     assert_eq!(
         super::try_parse_named_choice("secretly choose land or nonland"),
-        Some(ChoiceType::Labeled {
-            options: vec!["Land".to_string(), "Nonland".to_string()]
-        })
+        Some(ChoiceType::LandOrNonlandKind)
     );
 }
 

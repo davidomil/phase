@@ -336,6 +336,12 @@ pub enum ChoiceType {
     },
     /// "Choose a land type" — includes basic + common nonbasic land types.
     LandType,
+    /// "Choose land or nonland" for library-kind effects whose later clauses
+    /// read `last_named_choice` through `IsChosenLandOrNonlandKind`.
+    LandOrNonlandKind,
+    /// "An opponent guesses whether the top card is the chosen kind" — the
+    /// opponent predicts the revealed card's land/nonland kind.
+    LandOrNonlandGuess,
     /// "Choose an opponent" — selects one opponent player (CR 102.3 defines an
     /// opponent as any player not on the choosing player's team).
     ///
@@ -422,6 +428,29 @@ impl ChoiceType {
         Self::CardType { excluded }
     }
 
+    pub fn land_or_nonland_kind_options() -> Vec<String> {
+        LAND_OR_NONLAND_KIND_LABELS
+            .iter()
+            .map(|label| (*label).to_string())
+            .collect()
+    }
+
+    pub fn is_resolution_scoped_land_or_nonland_choice(&self) -> bool {
+        matches!(self, Self::LandOrNonlandKind | Self::LandOrNonlandGuess)
+    }
+
+    pub fn is_land_or_nonland_guess(&self) -> bool {
+        matches!(self, Self::LandOrNonlandGuess)
+    }
+
+    pub fn needs_choice_source_context(&self) -> bool {
+        matches!(self, Self::LandOrNonlandGuess)
+    }
+
+    pub fn is_land_or_nonland_kind_label(label: &str) -> bool {
+        LAND_OR_NONLAND_KIND_LABELS.contains(&label)
+    }
+
     /// Whether the player supplies the chosen value at runtime rather than the
     /// engine enumerating a fixed option set.
     ///
@@ -444,6 +473,8 @@ impl ChoiceType {
         matches!(self, Self::CardName | Self::Word | Self::Artist)
     }
 }
+
+pub const LAND_OR_NONLAND_KIND_LABELS: [&str; 2] = ["Land", "Nonland"];
 
 impl Serialize for ChoiceType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -507,6 +538,12 @@ impl Serialize for ChoiceType {
                 variant.end()
             }
             Self::LandType => serializer.serialize_unit_variant("ChoiceType", 8, "LandType"),
+            Self::LandOrNonlandKind => {
+                serializer.serialize_unit_variant("ChoiceType", 15, "LandOrNonlandKind")
+            }
+            Self::LandOrNonlandGuess => {
+                serializer.serialize_unit_variant("ChoiceType", 16, "LandOrNonlandGuess")
+            }
             // Serialize the unrestricted form as the legacy unit variant
             // "Opponent" so existing card-data JSON stays byte-stable; only emit
             // the struct form when a restriction is present.
@@ -614,6 +651,8 @@ impl<'de> Deserialize<'de> for ChoiceType {
                 "CardType" => Ok(Self::card_type()),
                 "CardName" => Ok(Self::CardName),
                 "LandType" => Ok(Self::LandType),
+                "LandOrNonlandKind" => Ok(Self::LandOrNonlandKind),
+                "LandOrNonlandGuess" => Ok(Self::LandOrNonlandGuess),
                 "Opponent" => Ok(Self::Opponent { restriction: None }),
                 "Player" => Ok(Self::Player),
                 "TwoColors" => Ok(Self::TwoColors),
@@ -629,6 +668,8 @@ impl<'de> Deserialize<'de> for ChoiceType {
                         "CardType",
                         "CardName",
                         "LandType",
+                        "LandOrNonlandKind",
+                        "LandOrNonlandGuess",
                         "Opponent",
                         "Player",
                         "TwoColors",
@@ -1113,6 +1154,9 @@ impl ChoiceValue {
             ChoiceType::CardName => Some(Self::CardName(value.to_string())),
             ChoiceType::NumberRange { .. } => value.parse::<u8>().ok().map(Self::Number),
             ChoiceType::Labeled { .. } => Some(Self::Label(value.to_string())),
+            ChoiceType::LandOrNonlandKind | ChoiceType::LandOrNonlandGuess => {
+                ChoiceType::is_land_or_nonland_kind_label(value).then(|| Self::Label(value.into()))
+            }
             ChoiceType::LandType => Some(Self::LandType(value.to_string())),
             // CR 800.4a: Parse player ID from string.
             ChoiceType::Opponent { .. } | ChoiceType::Player => value
@@ -10139,8 +10183,9 @@ pub enum Effect {
     /// Sets WaitingFor::NamedChoice and stores the result in GameState::last_named_choice.
     Choose {
         choice_type: ChoiceType,
-        /// When true, the chosen value is stored on the source object's chosen_attributes.
-        /// Used for ETB choices that other abilities reference ("the chosen type/color").
+        /// When true, persistable choice types store the chosen value on the
+        /// source object's chosen_attributes. Some non-persisting choice types
+        /// still carry source context for logs or prompts.
         #[serde(default)]
         persist: bool,
         /// CR 608.2d (override) + CR 701.9b (analogous): When `Random`, the game
@@ -19565,6 +19610,19 @@ mod tests {
         let json = serde_json::to_string(&ChoiceType::Opponent { restriction: None }).unwrap();
 
         assert_eq!(json, "\"Opponent\"");
+    }
+
+    #[test]
+    fn choice_type_land_nonland_unit_variants_serde_round_trip() {
+        for original in [
+            ChoiceType::LandOrNonlandKind,
+            ChoiceType::LandOrNonlandGuess,
+        ] {
+            let json = serde_json::to_string(&original).unwrap();
+            let decoded: ChoiceType = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(decoded, original);
+        }
     }
 
     #[test]

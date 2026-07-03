@@ -1768,6 +1768,8 @@
       "twoColors": "Choose Two Colors",
       "numberRange": "Choose a Number",
       "labeled": "Make a Choice",
+      "landOrNonlandKind": "Choose Land or Nonland",
+      "landOrNonlandGuess": "Guess Land or Nonland",
       "keyword": "Choose an Ability",
       "counterKind": "Choose a Counter",
       "fallback": "Make a Choice"

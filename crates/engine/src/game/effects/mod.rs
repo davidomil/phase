@@ -7910,9 +7910,13 @@ pub(crate) fn evaluate_condition(
                 .copied();
             let type_matches = subject_id
                 .map(|id| {
-                    card_types.iter().any(|card_type| {
-                        super::printed_cards::object_has_core_type(state, id, *card_type)
-                    })
+                    if card_types.is_empty() {
+                        additional_filter.is_some() || subtype_filter.is_some()
+                    } else {
+                        card_types.iter().any(|card_type| {
+                            super::printed_cards::object_has_core_type(state, id, *card_type)
+                        })
+                    }
                 })
                 .unwrap_or(false);
             // CR 205.3m: Match the revealed card's subtype against the subtype filter.
@@ -8878,11 +8882,12 @@ mod tests {
     use crate::game::zones::create_object;
     use crate::types::ability::{
         AbilityCondition, AbilityDefinition, AbilityKind, AggregateFunction, BounceSelection,
-        CastingPermission, Chooser, ChosenAttribute, Comparator, ContinuousModification,
-        ControllerRef, DelayedTriggerCondition, Duration, EffectScope, FilterProp,
-        ManaSpendPermission, ObjectProperty, PermissionGrantee, PlayerFilter, PlayerScope, PtValue,
-        QuantityExpr, QuantityRef, SpellContext, StaticDefinition, TapStateChange, TargetFilter,
-        TargetRef, TypeFilter, TypedFilter, UnlessPayModifier, UntilCondition, ZoneOwner,
+        CastingPermission, ChoiceValue, Chooser, ChosenAttribute, Comparator,
+        ContinuousModification, ControllerRef, DelayedTriggerCondition, Duration, EffectScope,
+        FilterProp, ManaSpendPermission, ObjectProperty, PermissionGrantee, PlayerFilter,
+        PlayerScope, PtValue, QuantityExpr, QuantityRef, SpellContext, StaticDefinition,
+        TapStateChange, TargetFilter, TargetRef, TypeFilter, TypedFilter, UnlessPayModifier,
+        UntilCondition, ZoneOwner,
     };
     use crate::types::actions::GameAction;
     use crate::types::card::CardFace;
@@ -18602,6 +18607,60 @@ mod tests {
             evaluate_condition(&land_cond, &state, &ability),
             "reveal must take precedence over the zone-change fallback",
         );
+    }
+
+    #[test]
+    fn revealed_has_card_type_accepts_chosen_land_nonland_property_without_type_list() {
+        let mut state = GameState::new_two_player(42);
+        let land_card = create_object(
+            &mut state,
+            CardId(100),
+            PlayerId(0),
+            "Island".to_string(),
+            Zone::Library,
+        );
+        {
+            let obj = state.objects.get_mut(&land_card).unwrap();
+            obj.card_types.core_types.push(CoreType::Land);
+            obj.base_card_types = obj.card_types.clone();
+        }
+        let nonland_card = create_object(
+            &mut state,
+            CardId(101),
+            PlayerId(0),
+            "Ornithopter".to_string(),
+            Zone::Library,
+        );
+        {
+            let obj = state.objects.get_mut(&nonland_card).unwrap();
+            obj.card_types.core_types.push(CoreType::Artifact);
+            obj.base_card_types = obj.card_types.clone();
+        }
+        let ability = ResolvedAbility::new(
+            Effect::Draw {
+                count: QuantityExpr::Fixed { value: 1 },
+                target: TargetFilter::Controller,
+            },
+            vec![],
+            ObjectId(1),
+            PlayerId(0),
+        );
+        let condition = AbilityCondition::RevealedHasCardType {
+            card_types: Vec::new(),
+            additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+            subtype_filter: None,
+        };
+
+        state.last_named_choice = Some(ChoiceValue::Label("Land".to_string()));
+        state.last_revealed_ids.push(land_card);
+        assert!(evaluate_condition(&condition, &state, &ability));
+
+        state.last_revealed_ids.clear();
+        state.last_revealed_ids.push(nonland_card);
+        assert!(!evaluate_condition(&condition, &state, &ability));
+
+        state.last_named_choice = Some(ChoiceValue::Label("Nonland".to_string()));
+        assert!(evaluate_condition(&condition, &state, &ability));
     }
 
     #[test]

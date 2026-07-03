@@ -16981,7 +16981,7 @@ mod snapshot_tests {
     /// `ReplacementMode::Optional { decline: None }` (so the player is
     /// prompted to accept/decline and the original draw resolves on decline),
     /// and the effect chain must compose the existing `Effect::Choose`
-    /// (`ChoiceType::Labeled["Land","Nonland"]`) and `Effect::RevealUntil`
+    /// (`ChoiceType::LandOrNonlandKind`) and `Effect::RevealUntil`
     /// (filter: `FilterProp::IsChosenLandOrNonlandKind`, kept→Hand, rest→
     /// Library) building blocks with no `Unimplemented` node anywhere.
     #[test]
@@ -17005,22 +17005,17 @@ mod snapshot_tests {
         );
 
         let execute = def.execute.as_ref().expect("execute chain must be present");
-        // Head clause: Choose(Labeled["Land","Nonland"]).
+        // Head clause: Choose(LandOrNonlandKind).
         let Effect::Choose {
-            choice_type: ChoiceType::Labeled { options },
+            choice_type: ChoiceType::LandOrNonlandKind,
             ..
         } = &*execute.effect
         else {
             panic!(
-                "expected head Effect::Choose(Labeled), got {:?}",
+                "expected head Effect::Choose(LandOrNonlandKind), got {:?}",
                 execute.effect
             );
         };
-        assert_eq!(
-            options,
-            &vec!["Land".to_string(), "Nonland".to_string()],
-            "labeled choice options must be exactly [\"Land\",\"Nonland\"]"
-        );
 
         // RevealUntil { filter: IsChosenLandOrNonlandKind, kept=Hand, rest=Library }
         // chained via the bare-and split (either as ContinuationStep or

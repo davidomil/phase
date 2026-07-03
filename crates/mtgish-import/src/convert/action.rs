@@ -35,7 +35,7 @@ use crate::convert::static_effect;
 use crate::convert::token;
 use crate::convert::trigger as trigger_mod;
 use crate::schema::types::{
-    Action, Actions, CardInExile, CardInGraveyard, CardType, CardsInHand, CounterType,
+    Action, Actions, CardInExile, CardInGraveyard, CardType, Cards, CardsInHand, CounterType,
     CreatableToken, CreatureType, DamageRecipient, DamageToRecipients, DistributedTarget,
     Distribution, FutureTrigger, GameNumber, GroupFilter, ManaUseModifier, Permanent,
     PhasedOutEffect, Player, Players, ReplacementActionWouldEnter,
@@ -1041,12 +1041,36 @@ pub fn convert_actions(actions: &Actions) -> ConvResult<ActionsConversion> {
                         return Ok(scoped_conversion(inner_conv, scope, condition));
                     }
                 }
+                Action::APlayerAction(players, inner) => {
+                    if let Some((scope, condition)) = players_to_scope_and_condition(players)? {
+                        if scope == PlayerFilter::Opponent {
+                            if let Some(opts) =
+                                land_or_nonland_library_filter_options(inner.as_ref())
+                            {
+                                let inner_conv = ActionsConversion::Linear {
+                                    effects: vec![land_or_nonland_library_guess_effect(opts)?],
+                                };
+                                return Ok(scoped_conversion(inner_conv, scope, condition));
+                            }
+                        }
+                        let inner_actions = Actions::ActionList(vec![(**inner).clone()]);
+                        let inner_conv = convert_actions(&inner_actions)?;
+                        return Ok(scoped_conversion(inner_conv, scope, condition));
+                    }
+                }
                 // CR 119.1 + CR 119.3 + CR 608.2c: Plural body variant —
                 // `Action::EachPlayerActions(players, Vec<Action>)` is the
                 // multi-action sibling of `EachPlayerAction`. Wrap the body
                 // as an ActionList so the inner shape detector still runs
                 // (modal/optional/conditional inner shapes survive scoping).
                 Action::EachPlayerActions(players, body) => {
+                    if let Some((scope, condition)) = players_to_scope_and_condition(players)? {
+                        let inner_actions = Actions::ActionList(body.clone());
+                        let inner_conv = convert_actions(&inner_actions)?;
+                        return Ok(scoped_conversion(inner_conv, scope, condition));
+                    }
+                }
+                Action::APlayerActions(players, body) => {
                     if let Some((scope, condition)) = players_to_scope_and_condition(players)? {
                         let inner_actions = Actions::ActionList(body.clone());
                         let inner_conv = convert_actions(&inner_actions)?;
@@ -1761,11 +1785,57 @@ pub fn convert_chain_segments(list: &Actions) -> ConvResult<Vec<ChainSegment>> {
                     player_scope: Some(scope),
                 });
             }
+            Action::APlayerAction(players, inner) => {
+                let (scope, condition) =
+                    players_to_scope_and_condition(players)?.ok_or_else(|| {
+                        ConversionGap::MalformedIdiom {
+                            idiom: "ChainSegment/APlayerAction",
+                            path: String::new(),
+                            detail: format!("non-scopable players: {players:?}"),
+                        }
+                    })?;
+                let body_effects = if scope == PlayerFilter::Opponent {
+                    if let Some(opts) = land_or_nonland_library_filter_options(inner.as_ref()) {
+                        vec![land_or_nonland_library_guess_effect(opts)?]
+                    } else {
+                        convert_many_with_bindings(inner, &bindings)?
+                    }
+                } else {
+                    convert_many_with_bindings(inner, &bindings)?
+                };
+                flush_unconditional(&mut current, &mut segments);
+                segments.push(ChainSegment {
+                    condition,
+                    effects: body_effects,
+                    else_effects: None,
+                    optional: SegmentOptional::Mandatory,
+                    player_scope: Some(scope),
+                });
+            }
             Action::EachPlayerActions(players, body) => {
                 let (scope, condition) =
                     players_to_scope_and_condition(players)?.ok_or_else(|| {
                         ConversionGap::MalformedIdiom {
                             idiom: "ChainSegment/EachPlayerActions",
+                            path: String::new(),
+                            detail: format!("non-scopable players: {players:?}"),
+                        }
+                    })?;
+                let body_effects = convert_action_vec_with_bindings(body, &bindings)?;
+                flush_unconditional(&mut current, &mut segments);
+                segments.push(ChainSegment {
+                    condition,
+                    effects: body_effects,
+                    else_effects: None,
+                    optional: SegmentOptional::Mandatory,
+                    player_scope: Some(scope),
+                });
+            }
+            Action::APlayerActions(players, body) => {
+                let (scope, condition) =
+                    players_to_scope_and_condition(players)?.ok_or_else(|| {
+                        ConversionGap::MalformedIdiom {
+                            idiom: "ChainSegment/APlayerActions",
                             path: String::new(),
                             detail: format!("non-scopable players: {players:?}"),
                         }
@@ -3544,6 +3614,14 @@ pub fn convert(a: &Action) -> ConvResult<Effect> {
             build_layer_effect_until(affected, effects, expiration)?
         }
 
+        // CR 506.4: "Remove [creature] from combat" clears that creature's
+        // attacking/blocking combat status. The engine resolver owns the combat
+        // state mutation; the importer only lowers the mtgish permanent subject
+        // into the existing target-filter axis.
+        Action::RemoveCreatureFromCombat(target) => Effect::RemoveFromCombat {
+            target: convert_permanent(target)?,
+        },
+
         // CR 113.6 + CR 514.2: Temporary rules-modifying effect on a single
         // permanent — "Target creature can't attack this turn" / "Target
         // creature must attack this turn" pattern. Mirrors
@@ -4339,6 +4417,15 @@ pub fn convert(a: &Action) -> ConvResult<Effect> {
             persist: true,
             selection: engine::types::ability::TargetSelectionMode::Chosen,
         },
+        // CR 608.2d + CR 205.2a: "choose land or nonland" as a library-card
+        // kind. The runtime records the label in `last_named_choice`; later
+        // `Cards::TheChosenLibraryFilter` / `FilterProp::IsChosenLandOrNonlandKind`
+        // consumers compare it with the revealed card's land type. Secret and
+        // public variants share the same resolution-scoped mechanical output;
+        // neither persists a source-card label.
+        Action::ChooseLibraryFilter(opts) | Action::SecretlyChooseLibraryFilter(opts) => {
+            land_or_nonland_library_kind_effect(opts)?
+        }
         // CR 201.3 + CR 608.2d: "choose a card name". Engine
         // `ChoiceType::CardName` is a unit variant (no filter slot), so the
         // mtgish `Cards` constraint is supported only for the dominant
@@ -4515,6 +4602,54 @@ pub fn convert(a: &Action) -> ConvResult<Effect> {
             });
         }
     })
+}
+
+fn land_or_nonland_library_choice(opts: &[Cards]) -> ConvResult<ChoiceType> {
+    let has_land = opts
+        .iter()
+        .any(|opt| matches!(opt, Cards::IsCardtype(CardType::Land)));
+    let has_nonland = opts
+        .iter()
+        .any(|opt| matches!(opt, Cards::IsNonCardtype(CardType::Land)));
+
+    if opts.len() == 2 && has_land && has_nonland {
+        return Ok(ChoiceType::LandOrNonlandKind);
+    }
+
+    Err(ConversionGap::EnginePrerequisiteMissing {
+        engine_type: "ChoiceType::LandOrNonlandKind",
+        needed_variant: format!(
+            "ChooseLibraryFilter options beyond land/nonland: {}",
+            opts.iter()
+                .map(filter_mod::cards_variant_tag)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    })
+}
+
+fn land_or_nonland_library_kind_effect(opts: &[Cards]) -> ConvResult<Effect> {
+    Ok(Effect::Choose {
+        choice_type: land_or_nonland_library_choice(opts)?,
+        persist: false,
+        selection: engine::types::ability::TargetSelectionMode::Chosen,
+    })
+}
+
+fn land_or_nonland_library_guess_effect(opts: &[Cards]) -> ConvResult<Effect> {
+    land_or_nonland_library_choice(opts)?;
+    Ok(Effect::Choose {
+        choice_type: ChoiceType::LandOrNonlandGuess,
+        persist: false,
+        selection: engine::types::ability::TargetSelectionMode::Chosen,
+    })
+}
+
+fn land_or_nonland_library_filter_options(action: &Action) -> Option<&[Cards]> {
+    match action {
+        Action::ChooseLibraryFilter(opts) | Action::SecretlyChooseLibraryFilter(opts) => Some(opts),
+        _ => None,
+    }
 }
 
 /// CR 603.7 + CR 603.7a: Map a mtgish `FutureTrigger` to the engine's
@@ -7183,9 +7318,9 @@ mod tests {
     use crate::schema::types::{
         CardInGraveyard, Cards, CardtypeVariable, ChoosableColor, Color, ColorList, Comparison,
         Condition, Cost, CounterType, CreatableToken, CreatureTokenSubtypes, CreatureTokenType,
-        DamageSources, Expiration, LayerEffect, ManaProduce, ManaSymbol, PTXValue, Permanent,
-        Permanents, Protectable, ProtectableColor, ReplacementActionWouldEnter, Rule, SubType,
-        TokenCopyEffects, TokenFlag, PT,
+        DamageSources, Expiration, LayerEffect, LookAtTopOfLibraryAction, ManaProduce, ManaSymbol,
+        PTXValue, Permanent, PermanentRule, Permanents, Protectable, ProtectableColor,
+        ReplacementActionWouldEnter, Rule, SubType, TokenCopyEffects, TokenFlag, PT,
     };
     use engine::types::ability::{
         AbilityKind, ChoiceType, Comparator, ContinuousModification, ControllerRef, Effect,
@@ -7194,6 +7329,18 @@ mod tests {
     use engine::types::card_type::CoreType;
     use engine::types::keywords::{HexproofFilter, Keyword, ProtectionTarget};
     use engine::types::mana::ManaColor;
+
+    fn assert_no_unimplemented_ability(def: &AbilityDefinition) {
+        if let Effect::Unimplemented { .. } = def.effect.as_ref() {
+            panic!("unexpected Unimplemented effect in ability chain: {def:?}");
+        }
+        if let Some(sub) = &def.sub_ability {
+            assert_no_unimplemented_ability(sub);
+        }
+        if let Some(else_ability) = &def.else_ability {
+            assert_no_unimplemented_ability(else_ability);
+        }
+    }
 
     // Issue #4201 follow-up — Turnabout's "choose artifact, creature, or
     // land" spell action (`Action::ChooseACardtypeFromList`, the
@@ -7242,6 +7389,151 @@ mod tests {
             TargetFilter::Typed(TypedFilter { properties, .. })
                 if properties.contains(&FilterProp::IsChosenCardType)
         ));
+    }
+
+    #[test]
+    fn choose_library_filter_lowers_to_land_nonland_kind_choice() {
+        let effect = convert(&Action::ChooseLibraryFilter(vec![
+            Cards::IsCardtype(CardType::Land),
+            Cards::IsNonCardtype(CardType::Land),
+        ]))
+        .unwrap();
+
+        match effect {
+            Effect::Choose {
+                choice_type: ChoiceType::LandOrNonlandKind,
+                persist,
+                ..
+            } => {
+                assert!(!persist);
+            }
+            other => panic!("expected a land/nonland kind choice, got {other:?}"),
+        }
+
+        let filter =
+            crate::convert::filter::cards_to_filter(&Cards::TheChosenLibraryFilter).unwrap();
+        assert!(matches!(
+            filter,
+            TargetFilter::Typed(TypedFilter { properties, .. })
+                if properties.contains(&FilterProp::IsChosenLandOrNonlandKind)
+        ));
+    }
+
+    #[test]
+    fn a_player_action_opponent_choose_library_filter_lowers_to_scoped_guess() {
+        let actions = Actions::ActionList(vec![Action::APlayerAction(
+            Box::new(Players::Opponent),
+            Box::new(Action::ChooseLibraryFilter(vec![
+                Cards::IsCardtype(CardType::Land),
+                Cards::IsNonCardtype(CardType::Land),
+            ])),
+        )]);
+
+        let conv = convert_actions(&actions).unwrap();
+        let ability = build_ability_from_actions(AbilityKind::Spell, None, conv).unwrap();
+
+        assert_eq!(ability.player_scope, Some(PlayerFilter::Opponent));
+        match ability.effect.as_ref() {
+            Effect::Choose {
+                choice_type: ChoiceType::LandOrNonlandGuess,
+                persist,
+                ..
+            } => {
+                assert!(!persist);
+            }
+            other => panic!("expected opponent-scoped land/nonland guess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gollum_scheming_guide_action_chain_lowers_guess_and_otherwise_branch() {
+        let land_or_nonland = || {
+            vec![
+                Cards::IsCardtype(CardType::Land),
+                Cards::IsNonCardtype(CardType::Land),
+            ]
+        };
+        let actions = Actions::ActionList(vec![
+            Action::LookAtTheTopNumberCardsOfLibrary(
+                Box::new(GameNumber::Integer(2)),
+                vec![LookAtTopOfLibraryAction::PutTheRemainingCardsOnTopOfLibraryInAnyOrder],
+            ),
+            Action::ChooseLibraryFilter(land_or_nonland()),
+            Action::APlayerAction(
+                Box::new(Players::Opponent),
+                Box::new(Action::ChooseLibraryFilter(land_or_nonland())),
+            ),
+            Action::RevealTopCardOfLibrary,
+            Action::IfElse(
+                Condition::ACardWasRevealedThisWay(Box::new(Cards::TheChosenLibraryFilter)),
+                vec![Action::RemoveCreatureFromCombat(Box::new(
+                    Permanent::ThisPermanent,
+                ))],
+                vec![
+                    Action::DrawACard,
+                    Action::CreatePermanentRuleEffectUntil(
+                        Box::new(Permanent::ThisPermanent),
+                        vec![PermanentRule::CantBeBlocked],
+                        Expiration::UntilEndOfTheNextTurn,
+                    ),
+                ],
+            ),
+        ]);
+
+        let conv = convert_actions(&actions).unwrap();
+        let ability = build_ability_from_actions(AbilityKind::Spell, None, conv).unwrap();
+
+        assert_no_unimplemented_ability(&ability);
+        assert!(matches!(ability.effect.as_ref(), Effect::Dig { .. }));
+        let controller_choice = ability
+            .sub_ability
+            .as_ref()
+            .expect("controller land/nonland choice");
+        assert!(matches!(
+            controller_choice.effect.as_ref(),
+            Effect::Choose {
+                choice_type: ChoiceType::LandOrNonlandKind,
+                ..
+            }
+        ));
+        let opponent_guess = controller_choice
+            .sub_ability
+            .as_ref()
+            .expect("opponent land/nonland guess");
+        assert_eq!(opponent_guess.player_scope, Some(PlayerFilter::Opponent));
+        assert!(matches!(
+            opponent_guess.effect.as_ref(),
+            Effect::Choose {
+                choice_type: ChoiceType::LandOrNonlandGuess,
+                ..
+            }
+        ));
+        let reveal = opponent_guess
+            .sub_ability
+            .as_ref()
+            .expect("top card reveal");
+        assert!(matches!(reveal.effect.as_ref(), Effect::RevealTop { .. }));
+        let guessed_right = reveal.sub_ability.as_ref().expect("guessed-right branch");
+        assert!(matches!(
+            guessed_right.effect.as_ref(),
+            Effect::RemoveFromCombat { .. }
+        ));
+        assert!(matches!(
+            guessed_right.condition,
+            Some(AbilityCondition::RevealedHasCardType {
+                additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+                ..
+            })
+        ));
+        let otherwise = guessed_right
+            .else_ability
+            .as_ref()
+            .expect("otherwise branch");
+        assert!(matches!(otherwise.effect.as_ref(), Effect::Draw { .. }));
+        assert!(
+            otherwise.sub_ability.is_some(),
+            "otherwise branch must include the can't-be-blocked effect after draw"
+        );
     }
 
     #[test]

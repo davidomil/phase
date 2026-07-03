@@ -1467,6 +1467,24 @@ fn parse_target_type_membership_condition_text(text: &str) -> Option<AbilityCond
     parsed
 }
 
+/// CR 608.2c + CR 701.20a: In a land/nonland top-card guessing sequence,
+/// "they guessed right" means the revealed card has the same land/nonland kind
+/// as the most recent opponent guess. The guess itself is lowered as
+/// `ChoiceType::LandOrNonlandGuess`, so this can reuse the chosen-kind filter
+/// already used by "of the chosen kind" effects.
+fn parse_guessed_right_condition_text(text: &str) -> Option<AbilityCondition> {
+    let lower = text.trim().trim_end_matches('.').to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "they guessed right" | "that player guessed right" | "that opponent guessed right"
+    )
+    .then_some(AbilityCondition::RevealedHasCardType {
+        card_types: vec![],
+        additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+        subtype_filter: None,
+    })
+}
+
 /// Consume a target-anaphoric noun phrase used as the subject of an "instead"
 /// gating condition. `it` is a special pronoun case (the only one that
 /// contracts to `it's`); the noun-phrase forms always take a space before
@@ -4673,6 +4691,10 @@ pub(super) fn try_nom_condition_as_ability_condition(
     // a type/subtype phrase, so it does not collide with the bare-color form
     // (which `parse_condition_text` handles separately).
     if let Some(condition) = parse_target_type_membership_condition_text(lower.as_str()) {
+        return Some(condition);
+    }
+
+    if let Some(condition) = parse_guessed_right_condition_text(lower.as_str()) {
         return Some(condition);
     }
 

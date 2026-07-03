@@ -1846,6 +1846,8 @@ fn fmt_choice_type(ct: &ChoiceType) -> String {
         ChoiceType::NumberRange { min, max } => return format!("number ({min}-{max})"),
         ChoiceType::Labeled { options } => return format!("one of: {}", options.join(", ")),
         ChoiceType::LandType => "land type",
+        ChoiceType::LandOrNonlandKind => "land/nonland kind",
+        ChoiceType::LandOrNonlandGuess => "land/nonland guess",
         ChoiceType::Opponent { .. } => "opponent",
         ChoiceType::Player => "player",
         ChoiceType::TwoColors => "two colors",

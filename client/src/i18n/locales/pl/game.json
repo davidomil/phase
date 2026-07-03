@@ -1731,6 +1731,8 @@
       "twoColors": "Wybierz dwa kolory",
       "numberRange": "Wybierz liczbę",
       "labeled": "Dokonaj wyboru",
+      "landOrNonlandKind": "Wybierz ląd lub nieląd",
+      "landOrNonlandGuess": "Zgadnij ląd lub nieląd",
       "keyword": "Wybierz zdolność",
       "counterKind": "Wybierz żeton",
       "fallback": "Dokonaj wyboru"

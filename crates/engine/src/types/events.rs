@@ -651,6 +651,15 @@ pub enum GameEvent {
         player_id: PlayerId,
         action: PlayerActionKind,
     },
+    /// Engine-authored diagnostic for Gollum-style land/nonland top-card
+    /// guesses. This is intentionally a log/debug event rather than rules input:
+    /// `ChooseOption` remains the authoritative action, while this records
+    /// whether AI or a human guessed land or nonland.
+    LandOrNonlandGuessMade {
+        player_id: PlayerId,
+        source_id: Option<ObjectId>,
+        choice: String,
+    },
     /// CR 701.19a: Regeneration shield — consumed on use, expires at cleanup.
     Regenerated {
         object_id: ObjectId,

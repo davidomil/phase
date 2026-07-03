@@ -29,6 +29,8 @@ const CHOICE_TYPE_TITLE_KEYS: Record<string, string> = {
   TwoColors: "twoColors",
   NumberRange: "numberRange",
   Labeled: "labeled",
+  LandOrNonlandKind: "landOrNonlandKind",
+  LandOrNonlandGuess: "landOrNonlandGuess",
   Keyword: "keyword",
   CounterKind: "counterKind",
 };

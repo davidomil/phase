@@ -6050,6 +6050,37 @@ fn try_parse_an_opponent_to_verb(
     Some(clause)
 }
 
+/// CR 608.2d + CR 701.20a: "An opponent guesses whether the top card of your
+/// library is the chosen kind" is a non-targeted opponent decision over the same
+/// land/nonland label space used by the preceding "choose land or nonland".
+///
+/// The runtime `Choose` effect stores only one `last_named_choice`, so this
+/// parser intentionally models the opponent's yes/no guess as the opponent
+/// choosing the predicted kind of the top card. For a public prior land/nonland
+/// choice, that is equivalent information: if the opponent predicts the revealed
+/// card's actual kind, "they guessed right"; otherwise they guessed wrong.
+fn try_parse_opponent_guesses_chosen_library_kind(text: &str) -> Option<ParsedEffectClause> {
+    let lower = text.trim().trim_end_matches('.').to_ascii_lowercase();
+    all_consuming((
+        tag::<_, _, OracleError<'_>>("an opponent guesses whether "),
+        alt((
+            tag("the top card of your library"),
+            tag("the top card of their library"),
+        )),
+        tag(" is the chosen kind"),
+    ))
+    .parse(lower.as_str())
+    .ok()?;
+
+    Some(parsed_clause(Effect::Choose {
+        choice_type: ChoiceType::LandOrNonlandGuess,
+        // `ChoiceType::LandOrNonlandGuess` carries source context for logging
+        // without persisting a source-card label.
+        persist: false,
+        selection: TargetSelectionMode::Chosen,
+    }))
+}
+
 fn filter_is_bare_opponent_player(filter: &TargetFilter) -> bool {
     matches!(
         filter,
@@ -19047,7 +19078,13 @@ pub(crate) fn try_parse_named_choice(lower: &str) -> Option<ChoiceType> {
     } else {
         // Generic "X or Y" / "X, Y, or Z" / "W, X, Y, or Z" labeled choice —
         // must come AFTER all specific patterns above.
-        try_parse_labeled_choice(rest).map(|options| ChoiceType::Labeled { options })
+        try_parse_labeled_choice(rest).map(|options| {
+            if options == ChoiceType::land_or_nonland_kind_options() {
+                ChoiceType::LandOrNonlandKind
+            } else {
+                ChoiceType::Labeled { options }
+            }
+        })
     }
 }
 
@@ -24053,6 +24090,33 @@ pub(crate) fn parse_effect_chain_ir(
                 source_text: normalized_text.to_string(),
                 target_selection_mode: chunk_ctx.target_selection_mode,
                 target_chooser: chunk_ctx.target_chooser.clone(),
+            });
+            continue;
+        }
+
+        if let Some(clause) = try_parse_opponent_guesses_chosen_library_kind(&text) {
+            clauses.push(ClauseIr {
+                parsed: clause,
+                boundary: chunk.boundary_after,
+                condition: condition.clone(),
+                is_optional,
+                opponent_may_scope,
+                repeat_for: repeat_for.clone(),
+                player_scope: Some(PlayerFilter::Opponent),
+                starting_with: starting_with.clone(),
+                delayed_condition: None,
+                prefix_delayed_condition: None,
+                intrinsic_continuation: None,
+                followup_continuation: None,
+                absorbed_by_followup: false,
+                multi_target: None,
+                where_x_expression: where_x_expression.clone(),
+                is_otherwise: false,
+                unless_pay: None,
+                special: None,
+                source_text: normalized_text.to_string(),
+                target_selection_mode: TargetSelectionMode::Chosen,
+                target_chooser: None,
             });
             continue;
         }
