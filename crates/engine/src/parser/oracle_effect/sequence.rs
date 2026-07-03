@@ -387,11 +387,11 @@ pub(super) fn patch_reveal_until_for_library_category_exile(def: &mut AbilityDef
 
 /// CR 608.2c + CR 205.2a: A bare "choose land or nonland" is an opaque
 /// labeled choice. It becomes a library-card-kind choice only when a later
-/// clause consumes "the chosen kind" through `IsChosenLandOrNonlandKind`.
-pub(super) fn promote_labeled_land_nonland_choices_for_chosen_kind(def: &mut AbilityDefinition) {
+/// clause consumes "the chosen kind" through `MatchesLastChosenCardPredicate`.
+pub(super) fn promote_labeled_card_predicate_choices_for_chosen_kind(def: &mut AbilityDefinition) {
     if let Some(sub) = def.sub_ability.as_mut() {
-        promote_labeled_land_nonland_choices_for_chosen_kind(sub);
-        if is_labeled_land_nonland_choice(&def.effect) && ability_uses_chosen_land_nonland_kind(sub)
+        promote_labeled_card_predicate_choices_for_chosen_kind(sub);
+        if is_labeled_card_predicate_choice(&def.effect) && ability_uses_chosen_card_predicate(sub)
         {
             if let Effect::Choose {
                 choice_type,
@@ -399,56 +399,61 @@ pub(super) fn promote_labeled_land_nonland_choices_for_chosen_kind(def: &mut Abi
                 ..
             } = def.effect.as_mut()
             {
-                *choice_type = ChoiceType::LandOrNonlandKind;
+                *choice_type = ChoiceType::CardPredicate {
+                    options: ChoiceType::land_or_nonland_card_predicate_options(),
+                };
                 *persist = false;
             }
         }
     }
     if let Some(else_ability) = def.else_ability.as_mut() {
-        promote_labeled_land_nonland_choices_for_chosen_kind(else_ability);
+        promote_labeled_card_predicate_choices_for_chosen_kind(else_ability);
     }
 }
 
-fn is_labeled_land_nonland_choice(effect: &Effect) -> bool {
+fn is_labeled_card_predicate_choice(effect: &Effect) -> bool {
     matches!(
         effect,
         Effect::Choose {
             choice_type: ChoiceType::Labeled { options },
             ..
-        } if *options == ChoiceType::land_or_nonland_kind_options()
+        } if *options
+            == ChoiceType::card_predicate_labels(
+                &ChoiceType::land_or_nonland_card_predicate_options()
+            )
     )
 }
 
-fn ability_uses_chosen_land_nonland_kind(def: &AbilityDefinition) -> bool {
-    effect_uses_chosen_land_nonland_kind(&def.effect)
+fn ability_uses_chosen_card_predicate(def: &AbilityDefinition) -> bool {
+    effect_uses_chosen_card_predicate(&def.effect)
         || def
             .condition
             .as_ref()
-            .is_some_and(condition_uses_chosen_land_nonland_kind)
+            .is_some_and(condition_uses_chosen_card_predicate)
         || def
             .sub_ability
             .as_deref()
-            .is_some_and(ability_uses_chosen_land_nonland_kind)
+            .is_some_and(ability_uses_chosen_card_predicate)
         || def
             .else_ability
             .as_deref()
-            .is_some_and(ability_uses_chosen_land_nonland_kind)
+            .is_some_and(ability_uses_chosen_card_predicate)
 }
 
-fn effect_uses_chosen_land_nonland_kind(effect: &Effect) -> bool {
+fn effect_uses_chosen_card_predicate(effect: &Effect) -> bool {
     match effect {
         Effect::Dig { filter, .. }
         | Effect::RevealUntil { filter, .. }
         | Effect::SearchLibrary { filter, .. }
-        | Effect::Seek { filter, .. } => target_filter_uses_chosen_land_nonland_kind(filter),
+        | Effect::Seek { filter, .. } => target_filter_uses_chosen_card_predicate(filter),
         _ => false,
     }
 }
 
-fn condition_uses_chosen_land_nonland_kind(condition: &AbilityCondition) -> bool {
+fn condition_uses_chosen_card_predicate(condition: &AbilityCondition) -> bool {
     match condition {
         AbilityCondition::RevealedHasCardType {
-            additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+            additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
             ..
         } => true,
         AbilityCondition::TargetMatchesFilter { filter, .. }
@@ -457,29 +462,29 @@ fn condition_uses_chosen_land_nonland_kind(condition: &AbilityCondition) -> bool
         | AbilityCondition::ControllerControlsMatching { filter }
         | AbilityCondition::ZoneChangedThisWay { filter }
         | AbilityCondition::CostPaidObjectMatchesFilter { filter } => {
-            target_filter_uses_chosen_land_nonland_kind(filter)
+            target_filter_uses_chosen_card_predicate(filter)
         }
         AbilityCondition::Not { condition }
         | AbilityCondition::ConditionInstead { inner: condition } => {
-            condition_uses_chosen_land_nonland_kind(condition)
+            condition_uses_chosen_card_predicate(condition)
         }
-        AbilityCondition::And { conditions } | AbilityCondition::Or { conditions } => conditions
-            .iter()
-            .any(condition_uses_chosen_land_nonland_kind),
+        AbilityCondition::And { conditions } | AbilityCondition::Or { conditions } => {
+            conditions.iter().any(condition_uses_chosen_card_predicate)
+        }
         _ => false,
     }
 }
 
-fn target_filter_uses_chosen_land_nonland_kind(filter: &TargetFilter) -> bool {
+fn target_filter_uses_chosen_card_predicate(filter: &TargetFilter) -> bool {
     match filter {
         TargetFilter::Typed(typed) => typed
             .properties
             .iter()
-            .any(|property| matches!(property, FilterProp::IsChosenLandOrNonlandKind)),
-        TargetFilter::Not { filter } => target_filter_uses_chosen_land_nonland_kind(filter),
-        TargetFilter::And { filters } | TargetFilter::Or { filters } => filters
-            .iter()
-            .any(target_filter_uses_chosen_land_nonland_kind),
+            .any(|property| matches!(property, FilterProp::MatchesLastChosenCardPredicate)),
+        TargetFilter::Not { filter } => target_filter_uses_chosen_card_predicate(filter),
+        TargetFilter::And { filters } | TargetFilter::Or { filters } => {
+            filters.iter().any(target_filter_uses_chosen_card_predicate)
+        }
         _ => false,
     }
 }

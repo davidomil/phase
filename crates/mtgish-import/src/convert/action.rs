@@ -4419,7 +4419,7 @@ pub fn convert(a: &Action) -> ConvResult<Effect> {
         },
         // CR 608.2d + CR 205.2a: "choose land or nonland" as a library-card
         // kind. The runtime records the label in `last_named_choice`; later
-        // `Cards::TheChosenLibraryFilter` / `FilterProp::IsChosenLandOrNonlandKind`
+        // `Cards::TheChosenLibraryFilter` / `FilterProp::MatchesLastChosenCardPredicate`
         // consumers compare it with the revealed card's land type. Secret and
         // public variants share the same resolution-scoped mechanical output;
         // neither persists a source-card label.
@@ -4613,11 +4613,13 @@ fn land_or_nonland_library_choice(opts: &[Cards]) -> ConvResult<ChoiceType> {
         .any(|opt| matches!(opt, Cards::IsNonCardtype(CardType::Land)));
 
     if opts.len() == 2 && has_land && has_nonland {
-        return Ok(ChoiceType::LandOrNonlandKind);
+        return Ok(ChoiceType::CardPredicate {
+            options: ChoiceType::land_or_nonland_card_predicate_options(),
+        });
     }
 
     Err(ConversionGap::EnginePrerequisiteMissing {
-        engine_type: "ChoiceType::LandOrNonlandKind",
+        engine_type: "ChoiceType::CardPredicate",
         needed_variant: format!(
             "ChooseLibraryFilter options beyond land/nonland: {}",
             opts.iter()
@@ -4639,7 +4641,9 @@ fn land_or_nonland_library_kind_effect(opts: &[Cards]) -> ConvResult<Effect> {
 fn land_or_nonland_library_guess_effect(opts: &[Cards]) -> ConvResult<Effect> {
     land_or_nonland_library_choice(opts)?;
     Ok(Effect::Choose {
-        choice_type: ChoiceType::LandOrNonlandGuess,
+        choice_type: ChoiceType::CardPredicateGuess {
+            options: ChoiceType::land_or_nonland_card_predicate_options(),
+        },
         persist: false,
         selection: engine::types::ability::TargetSelectionMode::Chosen,
     })
@@ -7401,11 +7405,15 @@ mod tests {
 
         match effect {
             Effect::Choose {
-                choice_type: ChoiceType::LandOrNonlandKind,
+                choice_type: ChoiceType::CardPredicate { options },
                 persist,
                 ..
             } => {
                 assert!(!persist);
+                assert_eq!(
+                    options,
+                    ChoiceType::land_or_nonland_card_predicate_options()
+                );
             }
             other => panic!("expected a land/nonland kind choice, got {other:?}"),
         }
@@ -7415,7 +7423,7 @@ mod tests {
         assert!(matches!(
             filter,
             TargetFilter::Typed(TypedFilter { properties, .. })
-                if properties.contains(&FilterProp::IsChosenLandOrNonlandKind)
+                if properties.contains(&FilterProp::MatchesLastChosenCardPredicate)
         ));
     }
 
@@ -7435,11 +7443,15 @@ mod tests {
         assert_eq!(ability.player_scope, Some(PlayerFilter::Opponent));
         match ability.effect.as_ref() {
             Effect::Choose {
-                choice_type: ChoiceType::LandOrNonlandGuess,
+                choice_type: ChoiceType::CardPredicateGuess { options },
                 persist,
                 ..
             } => {
                 assert!(!persist);
+                assert_eq!(
+                    options,
+                    &ChoiceType::land_or_nonland_card_predicate_options()
+                );
             }
             other => panic!("expected opponent-scoped land/nonland guess, got {other:?}"),
         }
@@ -7492,7 +7504,7 @@ mod tests {
         assert!(matches!(
             controller_choice.effect.as_ref(),
             Effect::Choose {
-                choice_type: ChoiceType::LandOrNonlandKind,
+                choice_type: ChoiceType::CardPredicate { .. },
                 ..
             }
         ));
@@ -7504,7 +7516,7 @@ mod tests {
         assert!(matches!(
             opponent_guess.effect.as_ref(),
             Effect::Choose {
-                choice_type: ChoiceType::LandOrNonlandGuess,
+                choice_type: ChoiceType::CardPredicateGuess { .. },
                 ..
             }
         ));
@@ -7521,7 +7533,7 @@ mod tests {
         assert!(matches!(
             guessed_right.condition,
             Some(AbilityCondition::RevealedHasCardType {
-                additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+                additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
                 ..
             })
         ));

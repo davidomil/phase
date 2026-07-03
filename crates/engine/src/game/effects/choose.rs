@@ -202,7 +202,7 @@ pub(crate) fn bind_named_choice(
     source_id: Option<ObjectId>,
 ) {
     if let Some(obj_id) =
-        source_id.filter(|_| !choice_type.is_resolution_scoped_land_or_nonland_choice())
+        source_id.filter(|_| !choice_type.is_resolution_scoped_card_predicate_choice())
     {
         // CR 608.2d: A multi-keyword choice (`ChoiceType::Keyword { count > 1 }`,
         // e.g. Greymond's "choose two abilities from among ...") arrives as one
@@ -453,8 +453,8 @@ fn compute_options(
         ChoiceType::CardName => Vec::new(),
         ChoiceType::NumberRange { min, max } => (*min..=*max).map(|n| n.to_string()).collect(),
         ChoiceType::Labeled { options } => options.clone(),
-        ChoiceType::LandOrNonlandKind | ChoiceType::LandOrNonlandGuess => {
-            ChoiceType::land_or_nonland_kind_options()
+        ChoiceType::CardPredicate { options } | ChoiceType::CardPredicateGuess { options } => {
+            ChoiceType::card_predicate_labels(options)
         }
         // CR 205.3i: Land types include the basic land types plus Cave, Desert, Gate, etc.
         ChoiceType::LandType => to_strings(LAND_TYPES),
@@ -860,7 +860,9 @@ mod tests {
         let mut state = GameState::new_two_player(42);
         let ability = ResolvedAbility::new(
             Effect::Choose {
-                choice_type: ChoiceType::LandOrNonlandGuess,
+                choice_type: ChoiceType::CardPredicateGuess {
+                    options: ChoiceType::land_or_nonland_card_predicate_options(),
+                },
                 persist: false,
                 selection: crate::types::ability::TargetSelectionMode::Chosen,
             },
@@ -880,8 +882,18 @@ mod tests {
                 source_id,
             } => {
                 assert_eq!(*player, PlayerId(1));
-                assert_eq!(*choice_type, ChoiceType::LandOrNonlandGuess);
-                assert_eq!(options, &ChoiceType::land_or_nonland_kind_options());
+                assert_eq!(
+                    *choice_type,
+                    ChoiceType::CardPredicateGuess {
+                        options: ChoiceType::land_or_nonland_card_predicate_options()
+                    }
+                );
+                assert_eq!(
+                    options,
+                    &ChoiceType::card_predicate_labels(
+                        &ChoiceType::land_or_nonland_card_predicate_options()
+                    )
+                );
                 assert_eq!(*source_id, Some(ObjectId(100)));
             }
             other => panic!("Expected NamedChoice, got {:?}", other),

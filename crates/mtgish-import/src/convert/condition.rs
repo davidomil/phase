@@ -244,7 +244,7 @@ fn revealed_card_condition(cards: &Cards) -> ConvResult<AbilityCondition> {
         }),
         Cards::TheChosenLibraryFilter => Ok(AbilityCondition::RevealedHasCardType {
             card_types: Vec::new(),
-            additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+            additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
             subtype_filter: None,
         }),
         other => Err(ConversionGap::EnginePrerequisiteMissing {
@@ -3611,7 +3611,7 @@ mod tests {
             converted,
             AbilityCondition::RevealedHasCardType {
                 card_types: Vec::new(),
-                additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+                additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
                 subtype_filter: None,
             }
         );

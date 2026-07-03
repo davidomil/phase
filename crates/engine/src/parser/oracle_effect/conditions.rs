@@ -1467,11 +1467,11 @@ fn parse_target_type_membership_condition_text(text: &str) -> Option<AbilityCond
     parsed
 }
 
-/// CR 608.2c + CR 701.20a: In a land/nonland top-card guessing sequence,
-/// "they guessed right" means the revealed card has the same land/nonland kind
-/// as the most recent opponent guess. The guess itself is lowered as
-/// `ChoiceType::LandOrNonlandGuess`, so this can reuse the chosen-kind filter
-/// already used by "of the chosen kind" effects.
+/// CR 608.2c + CR 701.20a: In a top-card predicate guessing sequence, "they
+/// guessed right" means the revealed card matches the most recent opponent
+/// guess. The guess itself is lowered as `ChoiceType::CardPredicateGuess`, so
+/// this can reuse the same transient predicate filter used by "of the chosen
+/// kind" effects.
 fn parse_guessed_right_condition_text(text: &str) -> Option<AbilityCondition> {
     let lower = text.trim().trim_end_matches('.').to_ascii_lowercase();
     matches!(
@@ -1480,7 +1480,7 @@ fn parse_guessed_right_condition_text(text: &str) -> Option<AbilityCondition> {
     )
     .then_some(AbilityCondition::RevealedHasCardType {
         card_types: vec![],
-        additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+        additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
         subtype_filter: None,
     })
 }

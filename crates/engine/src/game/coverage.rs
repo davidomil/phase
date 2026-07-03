@@ -797,7 +797,9 @@ fn fmt_typed_filter(tf: &TypedFilter) -> String {
                 ));
             }
             FilterProp::IsChosenCardType => parts.push("chosen card type".into()),
-            FilterProp::IsChosenLandOrNonlandKind => parts.push("chosen land/nonland kind".into()),
+            FilterProp::MatchesLastChosenCardPredicate => {
+                parts.push("chosen card predicate".into())
+            }
             FilterProp::NotColor { color } => {
                 parts.push(format!("non-{}", format!("{color:?}").to_lowercase()));
             }
@@ -1846,8 +1848,8 @@ fn fmt_choice_type(ct: &ChoiceType) -> String {
         ChoiceType::NumberRange { min, max } => return format!("number ({min}-{max})"),
         ChoiceType::Labeled { options } => return format!("one of: {}", options.join(", ")),
         ChoiceType::LandType => "land type",
-        ChoiceType::LandOrNonlandKind => "land/nonland kind",
-        ChoiceType::LandOrNonlandGuess => "land/nonland guess",
+        ChoiceType::CardPredicate { .. } => "card predicate",
+        ChoiceType::CardPredicateGuess { .. } => "card predicate guess",
         ChoiceType::Opponent { .. } => "opponent",
         ChoiceType::Player => "player",
         ChoiceType::TwoColors => "two colors",

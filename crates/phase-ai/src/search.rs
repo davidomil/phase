@@ -152,7 +152,7 @@ pub fn choose_action_with_session(
         _ => {}
     }
 
-    if let Some(action) = random_land_nonland_guess(state, ai_player, rng) {
+    if let Some(action) = random_card_predicate_guess(state, ai_player, rng) {
         return Some(action);
     }
 
@@ -228,7 +228,7 @@ pub fn choose_action_with_session(
     chosen
 }
 
-fn random_land_nonland_guess(
+fn random_card_predicate_guess(
     state: &GameState,
     ai_player: PlayerId,
     rng: &mut impl Rng,
@@ -242,7 +242,7 @@ fn random_land_nonland_guess(
     else {
         return None;
     };
-    if *player != ai_player || !choice_type.is_land_or_nonland_guess() {
+    if *player != ai_player || !choice_type.is_card_predicate_guess() {
         return None;
     }
     let source = state.objects.get(source_id)?;
@@ -4555,8 +4555,12 @@ mod tests {
         );
         state.waiting_for = WaitingFor::NamedChoice {
             player: PlayerId(1),
-            choice_type: ChoiceType::LandOrNonlandGuess,
-            options: ChoiceType::land_or_nonland_kind_options(),
+            choice_type: ChoiceType::CardPredicateGuess {
+                options: ChoiceType::land_or_nonland_card_predicate_options(),
+            },
+            options: ChoiceType::card_predicate_labels(
+                &ChoiceType::land_or_nonland_card_predicate_options(),
+            ),
             source_id: Some(source_id),
         };
         let config = create_config(AiDifficulty::Medium, Platform::Native);
@@ -4592,14 +4596,18 @@ mod tests {
         );
         state.waiting_for = WaitingFor::NamedChoice {
             player: PlayerId(1),
-            choice_type: ChoiceType::LandOrNonlandKind,
-            options: ChoiceType::land_or_nonland_kind_options(),
+            choice_type: ChoiceType::CardPredicate {
+                options: ChoiceType::land_or_nonland_card_predicate_options(),
+            },
+            options: ChoiceType::card_predicate_labels(
+                &ChoiceType::land_or_nonland_card_predicate_options(),
+            ),
             source_id: Some(source_id),
         };
         let mut rng = SmallRng::seed_from_u64(1);
 
         assert!(
-            random_land_nonland_guess(&state, PlayerId(1), &mut rng).is_none(),
+            random_card_predicate_guess(&state, PlayerId(1), &mut rng).is_none(),
             "ordinary land/nonland kind choices are strategic choices, not random guesses"
         );
     }

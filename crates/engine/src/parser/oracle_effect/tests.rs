@@ -20423,7 +20423,7 @@ fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
                 && matches!(
                     node.effect.as_ref(),
                     Effect::Choose {
-                        choice_type: ChoiceType::LandOrNonlandGuess,
+                        choice_type: ChoiceType::CardPredicateGuess { .. },
                         ..
                     }
                 )
@@ -20433,7 +20433,7 @@ fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
         matches!(
             opponent_guess.effect.as_ref(),
             Effect::Choose {
-                choice_type: ChoiceType::LandOrNonlandGuess,
+                choice_type: ChoiceType::CardPredicateGuess { .. },
                 persist: false,
                 ..
             }
@@ -20456,7 +20456,7 @@ fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
         remove.condition,
         Some(AbilityCondition::RevealedHasCardType {
             card_types: vec![],
-            additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+            additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
             subtype_filter: None,
         })
     );
@@ -21558,7 +21558,7 @@ fn search_filter_card_of_chosen_kind() {
     assert!(tf
         .properties
         .iter()
-        .any(|property| matches!(property, FilterProp::IsChosenLandOrNonlandKind)));
+        .any(|property| matches!(property, FilterProp::MatchesLastChosenCardPredicate)));
 }
 
 #[test]
@@ -21577,7 +21577,7 @@ fn search_filter_permanent_card_of_chosen_kind() {
     assert!(tf
         .properties
         .iter()
-        .any(|property| matches!(property, FilterProp::IsChosenLandOrNonlandKind)));
+        .any(|property| matches!(property, FilterProp::MatchesLastChosenCardPredicate)));
 }
 
 // --- Seek parser tests ---
@@ -21831,7 +21831,7 @@ fn seek_cards_of_chosen_kind() {
     assert!(tf
         .properties
         .iter()
-        .any(|property| matches!(property, FilterProp::IsChosenLandOrNonlandKind)));
+        .any(|property| matches!(property, FilterProp::MatchesLastChosenCardPredicate)));
 }
 
 #[test]
@@ -21844,13 +21844,17 @@ fn choose_land_or_nonland_then_seek_chosen_kind_chain() {
     // for the following "chosen kind" clause without rendering a lasting
     // source-card label.
     let Effect::Choose {
-        choice_type: ChoiceType::LandOrNonlandKind,
+        choice_type: ChoiceType::CardPredicate { options },
         persist: false,
         ..
     } = *def.effect
     else {
         panic!("Expected Choose land/nonland, got {:?}", def.effect);
     };
+    assert_eq!(
+        options,
+        ChoiceType::land_or_nonland_card_predicate_options()
+    );
 
     let seek = def.sub_ability.expect("expected seek continuation");
     let Effect::Seek { filter, count, .. } = *seek.effect else {
@@ -21863,7 +21867,7 @@ fn choose_land_or_nonland_then_seek_chosen_kind_chain() {
     assert!(tf
         .properties
         .iter()
-        .any(|property| matches!(property, FilterProp::IsChosenLandOrNonlandKind)));
+        .any(|property| matches!(property, FilterProp::MatchesLastChosenCardPredicate)));
 }
 
 #[test]
@@ -31847,7 +31851,9 @@ fn named_choice_keeps_land_or_nonland_as_generic_label() {
     assert_eq!(
         super::try_parse_named_choice("secretly choose land or nonland"),
         Some(ChoiceType::Labeled {
-            options: ChoiceType::land_or_nonland_kind_options()
+            options: ChoiceType::card_predicate_labels(
+                &ChoiceType::land_or_nonland_card_predicate_options()
+            )
         })
     );
 }

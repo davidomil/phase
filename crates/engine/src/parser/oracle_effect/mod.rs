@@ -6073,8 +6073,10 @@ fn try_parse_opponent_guesses_chosen_library_kind(text: &str) -> Option<ParsedEf
     .ok()?;
 
     Some(parsed_clause(Effect::Choose {
-        choice_type: ChoiceType::LandOrNonlandGuess,
-        // `ChoiceType::LandOrNonlandGuess` carries source context for logging
+        choice_type: ChoiceType::CardPredicateGuess {
+            options: ChoiceType::land_or_nonland_card_predicate_options(),
+        },
+        // `ChoiceType::CardPredicateGuess` carries source context for logging
         // without persisting a source-card label.
         persist: false,
         selection: TargetSelectionMode::Chosen,
@@ -9797,7 +9799,7 @@ fn try_parse_reveal_until(tp: TextPair, player: TargetFilter) -> Option<ParsedEf
 
 /// CR 614.11 + CR 701.20a: Detect a "card of the chosen kind" reveal-until
 /// filter by delegating to `parse_search_filter` and inspecting the result
-/// for `FilterProp::IsChosenLandOrNonlandKind`. The search-filter parser is
+/// for `FilterProp::MatchesLastChosenCardPredicate`. The search-filter parser is
 /// the canonical detector for this phrase (consumed by the Seek-of-the-
 /// chosen-kind family); reusing it here avoids a parallel string match and
 /// inherits any future "permanent card of the chosen kind" extensions.
@@ -9809,7 +9811,7 @@ fn try_parse_chosen_kind_filter(filter_text: &str) -> Option<TargetFilter> {
     };
     tf.properties
         .iter()
-        .any(|p| matches!(p, FilterProp::IsChosenLandOrNonlandKind))
+        .any(|p| matches!(p, FilterProp::MatchesLastChosenCardPredicate))
         .then_some(parsed)
 }
 
@@ -21455,7 +21457,7 @@ pub fn parse_effect_chain(text: &str, kind: AbilityKind) -> AbilityDefinition {
     let ir = parse_effect_chain_ir(text, kind, &mut ParseContext::default());
     let mut def = lower_effect_chain_ir(&ir);
     sequence::patch_reveal_until_for_library_category_exile(&mut def);
-    sequence::promote_labeled_land_nonland_choices_for_chosen_kind(&mut def);
+    sequence::promote_labeled_card_predicate_choices_for_chosen_kind(&mut def);
     fold_speed_floor_sentences(&mut def);
     rewrite_choose_tracked_set_exclusion(&mut def);
     fold_additional_combat_attacker_restriction(&mut def);
@@ -21497,7 +21499,7 @@ pub(crate) fn parse_effect_chain_with_context(
     let ir = parse_effect_chain_ir(text, kind, ctx);
     let mut def = lower_effect_chain_ir(&ir);
     sequence::patch_reveal_until_for_library_category_exile(&mut def);
-    sequence::promote_labeled_land_nonland_choices_for_chosen_kind(&mut def);
+    sequence::promote_labeled_card_predicate_choices_for_chosen_kind(&mut def);
     fold_speed_floor_sentences(&mut def);
     rewrite_choose_tracked_set_exclusion(&mut def);
     fold_additional_combat_attacker_restriction(&mut def);

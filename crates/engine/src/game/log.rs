@@ -194,7 +194,7 @@ fn categorize(event: &GameEvent) -> LogCategory {
             LogCategory::Destroy
         }
 
-        GameEvent::LandOrNonlandGuessMade { .. }
+        GameEvent::CardPredicateGuessMade { .. }
         | GameEvent::DebugActionUsed { .. }
         | GameEvent::DebugPermissionGranted { .. }
         | GameEvent::DebugPermissionRevoked { .. } => LogCategory::Debug,
@@ -269,14 +269,14 @@ fn format_segments(event: &GameEvent, state: &GameState) -> Vec<LogSegment> {
             text(" performed action "),
             text(&format!("{action:?}")),
         ],
-        GameEvent::LandOrNonlandGuessMade {
+        GameEvent::CardPredicateGuessMade {
             player_id,
             source_id,
             choice,
         } => {
             let mut segments = vec![
                 player_seg(state, *player_id),
-                text(" guesses card type "),
+                text(" guesses card kind "),
                 text(choice),
             ];
             if let Some(source_id) = source_id {
@@ -1330,7 +1330,7 @@ mod tests {
             "Gollum, Scheming Guide".to_string(),
             crate::types::zones::Zone::Battlefield,
         );
-        let event = GameEvent::LandOrNonlandGuessMade {
+        let event = GameEvent::CardPredicateGuessMade {
             player_id: PlayerId(1),
             source_id: Some(source_id),
             choice: "Nonland".to_string(),
@@ -1340,7 +1340,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category, LogCategory::Debug);
         assert!(entries[0].segments.iter().any(
-            |segment| matches!(segment, LogSegment::Text(text) if text == " guesses card type ")
+            |segment| matches!(segment, LogSegment::Text(text) if text == " guesses card kind ")
         ));
         assert!(entries[0]
             .segments

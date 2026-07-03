@@ -8882,7 +8882,7 @@ mod tests {
     use crate::game::zones::create_object;
     use crate::types::ability::{
         AbilityCondition, AbilityDefinition, AbilityKind, AggregateFunction, BounceSelection,
-        CastingPermission, ChoiceValue, Chooser, ChosenAttribute, Comparator,
+        CardPredicateChoice, CastingPermission, ChoiceValue, Chooser, ChosenAttribute, Comparator,
         ContinuousModification, ControllerRef, DelayedTriggerCondition, Duration, EffectScope,
         FilterProp, ManaSpendPermission, ObjectProperty, PermissionGrantee, PlayerFilter,
         PlayerScope, PtValue, QuantityExpr, QuantityRef, SpellContext, StaticDefinition,
@@ -18647,11 +18647,11 @@ mod tests {
         );
         let condition = AbilityCondition::RevealedHasCardType {
             card_types: Vec::new(),
-            additional_filter: Some(FilterProp::IsChosenLandOrNonlandKind),
+            additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
             subtype_filter: None,
         };
 
-        state.last_named_choice = Some(ChoiceValue::Label("Land".to_string()));
+        state.last_named_choice = Some(ChoiceValue::CardPredicate(CardPredicateChoice::Land));
         state.last_revealed_ids.push(land_card);
         assert!(evaluate_condition(&condition, &state, &ability));
 
@@ -18659,7 +18659,7 @@ mod tests {
         state.last_revealed_ids.push(nonland_card);
         assert!(!evaluate_condition(&condition, &state, &ability));
 
-        state.last_named_choice = Some(ChoiceValue::Label("Nonland".to_string()));
+        state.last_named_choice = Some(ChoiceValue::CardPredicate(CardPredicateChoice::Nonland));
         assert!(evaluate_condition(&condition, &state, &ability));
     }
 

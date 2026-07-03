@@ -336,12 +336,18 @@ pub enum ChoiceType {
     },
     /// "Choose a land type" — includes basic + common nonbasic land types.
     LandType,
-    /// "Choose land or nonland" for library-kind effects whose later clauses
-    /// read `last_named_choice` through `IsChosenLandOrNonlandKind`.
-    LandOrNonlandKind,
-    /// "An opponent guesses whether the top card is the chosen kind" — the
-    /// opponent predicts the revealed card's land/nonland kind.
-    LandOrNonlandGuess,
+    /// Choose a card predicate for resolution-scoped comparisons such as
+    /// "card of the chosen kind". Unlike `Color`, this is not a persisted
+    /// source choice; it classifies the card currently being revealed/checked.
+    CardPredicate {
+        options: Vec<CardPredicateChoice>,
+    },
+    /// Guess which card predicate the revealed card will match. Used by
+    /// Gollum-style "guessed right" sequences and intentionally resolution-
+    /// scoped rather than persisted on the source card.
+    CardPredicateGuess {
+        options: Vec<CardPredicateChoice>,
+    },
     /// "Choose an opponent" — selects one opponent player (CR 102.3 defines an
     /// opponent as any player not on the choosing player's team).
     ///
@@ -394,6 +400,42 @@ pub enum ChoiceType {
     },
 }
 
+/// A predicate option that can be chosen or guessed for a card revealed during
+/// the current resolution. Options may overlap: a red-black card matches both
+/// `Color(Red)` and `Color(Black)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CardPredicateChoice {
+    Land,
+    Nonland,
+    Color(ManaColor),
+}
+
+impl CardPredicateChoice {
+    pub fn label(self) -> String {
+        match self {
+            Self::Land => "Land".to_string(),
+            Self::Nonland => "Nonland".to_string(),
+            Self::Color(color) => format!("{color:?}"),
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "Land" => Some(Self::Land),
+            "Nonland" => Some(Self::Nonland),
+            _ => label.parse::<ManaColor>().ok().map(Self::Color),
+        }
+    }
+
+    pub fn matches_card(self, core_types: &[CoreType], colors: &[ManaColor]) -> bool {
+        match self {
+            Self::Land => core_types.contains(&CoreType::Land),
+            Self::Nonland => !core_types.contains(&CoreType::Land),
+            Self::Color(color) => colors.contains(&color),
+        }
+    }
+}
+
 impl ChoiceType {
     /// Unrestricted creature-type choice (all creature types offered).
     pub fn creature_type() -> Self {
@@ -428,27 +470,27 @@ impl ChoiceType {
         Self::CardType { excluded }
     }
 
-    pub fn land_or_nonland_kind_options() -> Vec<String> {
-        LAND_OR_NONLAND_KIND_LABELS
-            .iter()
-            .map(|label| (*label).to_string())
-            .collect()
+    pub fn land_or_nonland_card_predicate_options() -> Vec<CardPredicateChoice> {
+        vec![CardPredicateChoice::Land, CardPredicateChoice::Nonland]
     }
 
-    pub fn is_resolution_scoped_land_or_nonland_choice(&self) -> bool {
-        matches!(self, Self::LandOrNonlandKind | Self::LandOrNonlandGuess)
+    pub fn is_resolution_scoped_card_predicate_choice(&self) -> bool {
+        matches!(
+            self,
+            Self::CardPredicate { .. } | Self::CardPredicateGuess { .. }
+        )
     }
 
-    pub fn is_land_or_nonland_guess(&self) -> bool {
-        matches!(self, Self::LandOrNonlandGuess)
+    pub fn is_card_predicate_guess(&self) -> bool {
+        matches!(self, Self::CardPredicateGuess { .. })
     }
 
     pub fn needs_choice_source_context(&self) -> bool {
-        matches!(self, Self::LandOrNonlandGuess)
+        matches!(self, Self::CardPredicateGuess { .. })
     }
 
-    pub fn is_land_or_nonland_kind_label(label: &str) -> bool {
-        LAND_OR_NONLAND_KIND_LABELS.contains(&label)
+    pub fn card_predicate_labels(options: &[CardPredicateChoice]) -> Vec<String> {
+        options.iter().map(|option| option.label()).collect()
     }
 
     /// Whether the player supplies the chosen value at runtime rather than the
@@ -473,8 +515,6 @@ impl ChoiceType {
         matches!(self, Self::CardName | Self::Word | Self::Artist)
     }
 }
-
-pub const LAND_OR_NONLAND_KIND_LABELS: [&str; 2] = ["Land", "Nonland"];
 
 impl Serialize for ChoiceType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -538,11 +578,21 @@ impl Serialize for ChoiceType {
                 variant.end()
             }
             Self::LandType => serializer.serialize_unit_variant("ChoiceType", 8, "LandType"),
-            Self::LandOrNonlandKind => {
-                serializer.serialize_unit_variant("ChoiceType", 15, "LandOrNonlandKind")
+            Self::CardPredicate { options } => {
+                let mut variant =
+                    serializer.serialize_struct_variant("ChoiceType", 15, "CardPredicate", 1)?;
+                variant.serialize_field("options", options)?;
+                variant.end()
             }
-            Self::LandOrNonlandGuess => {
-                serializer.serialize_unit_variant("ChoiceType", 16, "LandOrNonlandGuess")
+            Self::CardPredicateGuess { options } => {
+                let mut variant = serializer.serialize_struct_variant(
+                    "ChoiceType",
+                    16,
+                    "CardPredicateGuess",
+                    1,
+                )?;
+                variant.serialize_field("options", options)?;
+                variant.end()
             }
             // Serialize the unrestricted form as the legacy unit variant
             // "Opponent" so existing card-data JSON stays byte-stable; only emit
@@ -622,6 +672,12 @@ impl<'de> Deserialize<'de> for ChoiceType {
             Labeled {
                 options: Vec<String>,
             },
+            CardPredicate {
+                options: Vec<CardPredicateChoice>,
+            },
+            CardPredicateGuess {
+                options: Vec<CardPredicateChoice>,
+            },
             Opponent {
                 #[serde(default)]
                 restriction: Option<Box<PlayerFilter>>,
@@ -651,8 +707,6 @@ impl<'de> Deserialize<'de> for ChoiceType {
                 "CardType" => Ok(Self::card_type()),
                 "CardName" => Ok(Self::CardName),
                 "LandType" => Ok(Self::LandType),
-                "LandOrNonlandKind" => Ok(Self::LandOrNonlandKind),
-                "LandOrNonlandGuess" => Ok(Self::LandOrNonlandGuess),
                 "Opponent" => Ok(Self::Opponent { restriction: None }),
                 "Player" => Ok(Self::Player),
                 "TwoColors" => Ok(Self::TwoColors),
@@ -668,8 +722,6 @@ impl<'de> Deserialize<'de> for ChoiceType {
                         "CardType",
                         "CardName",
                         "LandType",
-                        "LandOrNonlandKind",
-                        "LandOrNonlandGuess",
                         "Opponent",
                         "Player",
                         "TwoColors",
@@ -684,6 +736,10 @@ impl<'de> Deserialize<'de> for ChoiceType {
                 ChoiceTypeData::CardType { excluded } => Ok(Self::CardType { excluded }),
                 ChoiceTypeData::NumberRange { min, max } => Ok(Self::NumberRange { min, max }),
                 ChoiceTypeData::Labeled { options } => Ok(Self::Labeled { options }),
+                ChoiceTypeData::CardPredicate { options } => Ok(Self::CardPredicate { options }),
+                ChoiceTypeData::CardPredicateGuess { options } => {
+                    Ok(Self::CardPredicateGuess { options })
+                }
                 ChoiceTypeData::Opponent { restriction } => Ok(Self::Opponent { restriction }),
                 ChoiceTypeData::Keyword { options, count } => Ok(Self::Keyword { options, count }),
                 ChoiceTypeData::CounterKind { options } => Ok(Self::CounterKind { options }),
@@ -1104,6 +1160,7 @@ impl ChosenAttribute {
             // CR 608.2d + CR 122.1: Persist the chosen counter kind so a later
             // `Effect::PutChosenCounter` can read it.
             ChoiceValue::Counter(counter_type) => Some(Self::Counter(counter_type)),
+            ChoiceValue::CardPredicate(_) => None,
             ChoiceValue::LandType(_) => None,
         }
     }
@@ -1121,6 +1178,7 @@ pub enum ChoiceValue {
     CardName(String),
     Number(u8),
     Label(String),
+    CardPredicate(CardPredicateChoice),
     LandType(String),
     Player(PlayerId),
     TwoColors([ManaColor; 2]),
@@ -1154,8 +1212,11 @@ impl ChoiceValue {
             ChoiceType::CardName => Some(Self::CardName(value.to_string())),
             ChoiceType::NumberRange { .. } => value.parse::<u8>().ok().map(Self::Number),
             ChoiceType::Labeled { .. } => Some(Self::Label(value.to_string())),
-            ChoiceType::LandOrNonlandKind | ChoiceType::LandOrNonlandGuess => {
-                ChoiceType::is_land_or_nonland_kind_label(value).then(|| Self::Label(value.into()))
+            ChoiceType::CardPredicate { options } | ChoiceType::CardPredicateGuess { options } => {
+                let predicate = CardPredicateChoice::from_label(value)?;
+                options
+                    .contains(&predicate)
+                    .then_some(Self::CardPredicate(predicate))
             }
             ChoiceType::LandType => Some(Self::LandType(value.to_string())),
             // CR 800.4a: Parse player ID from string.
@@ -3378,11 +3439,10 @@ pub enum FilterProp {
     /// Used for "spells of the chosen type" patterns (Archon of Valor's Reach).
     /// Reads `ChosenAttribute::CardType` from the source permanent.
     IsChosenCardType,
-    /// CR 205.2 + CR 608.2c: Matches objects by the transient "land or nonland"
+    /// CR 205.2 + CR 608.2c: Matches objects by a transient card predicate
     /// choice made earlier in the same resolving instruction sequence. Used by
-    /// "of the chosen kind" library filters, where "Land" means cards with the
-    /// land card type and "Nonland" means cards without it.
-    IsChosenLandOrNonlandKind,
+    /// "of the chosen kind" library filters and guess-resolution conditions.
+    MatchesLastChosenCardPredicate,
     /// CR 115.7: Matches stack entries that have exactly one target.
     /// Used for "with a single target" qualifiers on retarget effects.
     HasSingleTarget,
@@ -19613,16 +19673,54 @@ mod tests {
     }
 
     #[test]
-    fn choice_type_land_nonland_unit_variants_serde_round_trip() {
+    fn choice_type_card_predicate_variants_serde_round_trip() {
         for original in [
-            ChoiceType::LandOrNonlandKind,
-            ChoiceType::LandOrNonlandGuess,
+            ChoiceType::CardPredicate {
+                options: ChoiceType::land_or_nonland_card_predicate_options(),
+            },
+            ChoiceType::CardPredicateGuess {
+                options: vec![
+                    CardPredicateChoice::Color(ManaColor::Red),
+                    CardPredicateChoice::Color(ManaColor::Black),
+                ],
+            },
         ] {
             let json = serde_json::to_string(&original).unwrap();
             let decoded: ChoiceType = serde_json::from_str(&json).unwrap();
 
             assert_eq!(decoded, original);
         }
+    }
+
+    #[test]
+    fn card_predicate_choices_can_overlap_for_multicolor_cards() {
+        let choice_type = ChoiceType::CardPredicateGuess {
+            options: vec![
+                CardPredicateChoice::Color(ManaColor::Red),
+                CardPredicateChoice::Color(ManaColor::Black),
+            ],
+        };
+
+        assert_eq!(
+            ChoiceValue::from_choice(&choice_type, "Red"),
+            Some(ChoiceValue::CardPredicate(CardPredicateChoice::Color(
+                ManaColor::Red
+            )))
+        );
+        assert_eq!(
+            ChoiceValue::from_choice(&choice_type, "Black"),
+            Some(ChoiceValue::CardPredicate(CardPredicateChoice::Color(
+                ManaColor::Black
+            )))
+        );
+        assert_eq!(ChoiceValue::from_choice(&choice_type, "Blue"), None);
+
+        let card_types = vec![CoreType::Creature];
+        let colors = vec![ManaColor::Red, ManaColor::Black];
+
+        assert!(CardPredicateChoice::Color(ManaColor::Red).matches_card(&card_types, &colors));
+        assert!(CardPredicateChoice::Color(ManaColor::Black).matches_card(&card_types, &colors));
+        assert!(!CardPredicateChoice::Color(ManaColor::Blue).matches_card(&card_types, &colors));
     }
 
     #[test]

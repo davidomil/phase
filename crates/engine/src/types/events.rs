@@ -651,11 +651,11 @@ pub enum GameEvent {
         player_id: PlayerId,
         action: PlayerActionKind,
     },
-    /// Engine-authored diagnostic for Gollum-style land/nonland top-card
+    /// Engine-authored diagnostic for top-card predicate
     /// guesses. This is intentionally a log/debug event rather than rules input:
     /// `ChooseOption` remains the authoritative action, while this records
-    /// whether AI or a human guessed land or nonland.
-    LandOrNonlandGuessMade {
+    /// which predicate AI or a human guessed.
+    CardPredicateGuessMade {
         player_id: PlayerId,
         source_id: Option<ObjectId>,
         choice: String,

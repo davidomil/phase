@@ -3722,8 +3722,8 @@ pub(super) fn handle_resolution_choice(
             // layer-affecting choice kinds, and record `last_named_choice`.
             // Single authority shared with the random `Effect::Choose` resolver.
             effects::choose::bind_named_choice(state, &choice_type, &choice, source_id);
-            if choice_type.is_land_or_nonland_guess() {
-                events.push(GameEvent::LandOrNonlandGuessMade {
+            if choice_type.is_card_predicate_guess() {
+                events.push(GameEvent::CardPredicateGuessMade {
                     player_id: player,
                     source_id,
                     choice: choice.clone(),
@@ -4693,8 +4693,12 @@ mod tests {
         );
         let waiting_for = WaitingFor::NamedChoice {
             player: PlayerId(1),
-            choice_type: ChoiceType::LandOrNonlandGuess,
-            options: ChoiceType::land_or_nonland_kind_options(),
+            choice_type: ChoiceType::CardPredicateGuess {
+                options: ChoiceType::land_or_nonland_card_predicate_options(),
+            },
+            options: ChoiceType::card_predicate_labels(
+                &ChoiceType::land_or_nonland_card_predicate_options(),
+            ),
             source_id: Some(source_id),
         };
         let mut events = Vec::new();
@@ -4712,7 +4716,7 @@ mod tests {
         assert!(matches!(outcome, ResolutionChoiceOutcome::WaitingFor(_)));
         assert!(events.iter().any(|event| matches!(
             event,
-            GameEvent::LandOrNonlandGuessMade {
+            GameEvent::CardPredicateGuessMade {
                 player_id,
                 source_id: Some(event_source_id),
                 choice,
@@ -4739,8 +4743,12 @@ mod tests {
         );
         let waiting_for = WaitingFor::NamedChoice {
             player: PlayerId(0),
-            choice_type: ChoiceType::LandOrNonlandKind,
-            options: ChoiceType::land_or_nonland_kind_options(),
+            choice_type: ChoiceType::CardPredicate {
+                options: ChoiceType::land_or_nonland_card_predicate_options(),
+            },
+            options: ChoiceType::card_predicate_labels(
+                &ChoiceType::land_or_nonland_card_predicate_options(),
+            ),
             source_id: Some(source_id),
         };
         let mut events = Vec::new();
@@ -4758,7 +4766,7 @@ mod tests {
         assert!(
             !events
                 .iter()
-                .any(|event| matches!(event, GameEvent::LandOrNonlandGuessMade { .. })),
+                .any(|event| matches!(event, GameEvent::CardPredicateGuessMade { .. })),
             "ordinary land/nonland kind choices should not produce debug guess logs"
         );
         assert!(

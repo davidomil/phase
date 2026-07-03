@@ -1571,7 +1571,7 @@ pub(crate) fn cards_to_filter(c: &crate::schema::types::Cards) -> ConvResult<Tar
             // runtime filter compares that label with the candidate card's
             // land card type.
             C::TheChosenLibraryFilter => TargetFilter::Typed(
-                TypedFilter::default().properties(vec![FilterProp::IsChosenLandOrNonlandKind]),
+                TypedFilter::default().properties(vec![FilterProp::MatchesLastChosenCardPredicate]),
             ),
             // CR 107.3 + CR 202.1: spell/card with {X} in its mana cost.
             C::HasXInManaCost => TargetFilter::Typed(
