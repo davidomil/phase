@@ -12,7 +12,7 @@ const DEFAULT_PORT = 9374;
 export type FlagCode = "us";
 
 export interface ServerPreset {
-  label: string;
+  labelKey: string;
   url: string;
   flag?: FlagCode;
 }
@@ -26,8 +26,12 @@ export interface ServerPreset {
 export const SERVER_PRESETS: ServerPreset[] = [
   ...(DEFAULT_MULTIPLAYER_SERVER_URL === OFFICIAL_MULTIPLAYER_SERVER_URL
     ? []
-    : [{ label: "Self-hosted", url: DEFAULT_MULTIPLAYER_SERVER_URL }]),
-  { label: "Official", url: OFFICIAL_MULTIPLAYER_SERVER_URL, flag: "us" },
+    : [{ labelKey: "serverPicker.selfHosted", url: DEFAULT_MULTIPLAYER_SERVER_URL }]),
+  {
+    labelKey: "serverPicker.official",
+    url: OFFICIAL_MULTIPLAYER_SERVER_URL,
+    flag: "us",
+  },
 ];
 
 /** The default region's URL — first entry in {@link SERVER_PRESETS}. */

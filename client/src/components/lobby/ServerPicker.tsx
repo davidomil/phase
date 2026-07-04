@@ -124,7 +124,7 @@ export function ServerPicker({ onClose, onApply }: ServerPickerProps) {
                       className="h-3.5 w-auto rounded-[2px] shadow-sm ring-1 ring-black/20"
                     />
                   )}
-                  {preset.label}
+                  {t(preset.labelKey)}
                 </span>
                 <span className="min-w-0 truncate pl-2 font-mono text-[10px] text-slate-500">
                   {preset.url.replace(/^wss?:\/\//, "")}
