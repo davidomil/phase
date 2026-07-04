@@ -6064,13 +6064,9 @@ fn try_parse_opponent_guesses_chosen_library_kind(
     chosen_player_index: u8,
 ) -> Option<ParsedEffectClause> {
     let lower = text.trim().trim_end_matches('.').to_ascii_lowercase();
-    all_consuming((
-        tag::<_, _, OracleError<'_>>("an opponent guesses whether "),
-        tag("the top card of your library"),
-        tag(" is the chosen kind"),
-    ))
-    .parse(lower.as_str())
-    .ok()?;
+    all_consuming(parse_top_card_predicate_guess)
+        .parse(lower.as_str())
+        .ok()?;
 
     let mut guess = AbilityDefinition::new(
         AbilityKind::Spell,
@@ -6095,6 +6091,81 @@ fn try_parse_opponent_guesses_chosen_library_kind(
     });
     choose_opponent.sub_ability = Some(Box::new(guess));
     Some(choose_opponent)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TopCardPredicateGuess {
+    ControllerLibraryChosenKind,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TopCardGuessLibrary {
+    Controller,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TopCardGuessPredicate {
+    ChosenKind,
+}
+
+fn parse_top_card_predicate_guess(input: &str) -> OracleResult<'_, TopCardPredicateGuess> {
+    let (input, _) = tag("an opponent guesses whether ").parse(input)?;
+    let (input, library) = parse_top_card_guess_library(input)?;
+    let (input, _) = tag(" is ").parse(input)?;
+    let (input, predicate) = parse_top_card_guess_predicate(input)?;
+    match (library, predicate) {
+        (TopCardGuessLibrary::Controller, TopCardGuessPredicate::ChosenKind) => {
+            Ok((input, TopCardPredicateGuess::ControllerLibraryChosenKind))
+        }
+    }
+}
+
+fn parse_top_card_guess_library(input: &str) -> OracleResult<'_, TopCardGuessLibrary> {
+    value(
+        TopCardGuessLibrary::Controller,
+        tag("the top card of your library"),
+    )
+    .parse(input)
+}
+
+fn parse_top_card_guess_predicate(input: &str) -> OracleResult<'_, TopCardGuessPredicate> {
+    value(TopCardGuessPredicate::ChosenKind, tag("the chosen kind")).parse(input)
+}
+
+fn chain_has_card_predicate_guess(clauses: &[ClauseIr]) -> bool {
+    clauses
+        .iter()
+        .any(|clause| parsed_clause_has_card_predicate_guess(&clause.parsed))
+}
+
+fn parsed_clause_has_card_predicate_guess(clause: &ParsedEffectClause) -> bool {
+    effect_is_card_predicate_guess(&clause.effect)
+        || clause
+            .sub_ability
+            .as_deref()
+            .is_some_and(ability_has_card_predicate_guess)
+}
+
+fn ability_has_card_predicate_guess(def: &AbilityDefinition) -> bool {
+    effect_is_card_predicate_guess(&def.effect)
+        || def
+            .sub_ability
+            .as_deref()
+            .is_some_and(ability_has_card_predicate_guess)
+        || def
+            .else_ability
+            .as_deref()
+            .is_some_and(ability_has_card_predicate_guess)
+}
+
+fn effect_is_card_predicate_guess(effect: &Effect) -> bool {
+    matches!(
+        effect,
+        Effect::Choose {
+            choice_type: ChoiceType::CardPredicateGuess { .. },
+            ..
+        }
+    )
 }
 
 fn filter_is_bare_opponent_player(filter: &TargetFilter) -> bool {
@@ -22008,6 +22079,39 @@ fn meld_single_clause(effect: Effect, source_text: &str) -> ClauseIr {
     }
 }
 
+fn unimplemented_clause_ir(
+    name: &str,
+    source_text: &str,
+    boundary: Option<ClauseBoundary>,
+) -> ClauseIr {
+    ClauseIr {
+        parsed: parsed_clause(Effect::Unimplemented {
+            name: name.to_string(),
+            description: None,
+        }),
+        boundary,
+        condition: None,
+        is_optional: false,
+        opponent_may_scope: None,
+        repeat_for: None,
+        player_scope: None,
+        starting_with: None,
+        delayed_condition: None,
+        prefix_delayed_condition: None,
+        intrinsic_continuation: None,
+        followup_continuation: None,
+        absorbed_by_followup: false,
+        multi_target: None,
+        where_x_expression: None,
+        is_otherwise: false,
+        unless_pay: None,
+        special: None,
+        source_text: source_text.to_string(),
+        target_selection_mode: TargetSelectionMode::Chosen,
+        target_chooser: None,
+    }
+}
+
 pub(crate) fn parse_effect_chain_ir(
     text: &str,
     kind: AbilityKind,
@@ -23302,6 +23406,27 @@ pub(crate) fn parse_effect_chain_ir(
             (None, text)
         };
         let condition = condition.or(leading_cond);
+        let has_card_predicate_guess =
+            condition.is_none() && chain_has_card_predicate_guess(&clauses);
+        let (predicate_guess_cond, text) = if has_card_predicate_guess {
+            conditions::strip_card_predicate_guess_result_conditional(&text)
+                .map(|(cond, body)| (Some(cond), body))
+                .unwrap_or((None, text))
+        } else {
+            (None, text)
+        };
+        if has_card_predicate_guess
+            && predicate_guess_cond.is_none()
+            && conditions::is_card_predicate_guess_result_conditional(&text)
+        {
+            clauses.push(unimplemented_clause_ir(
+                "card_predicate_guess_result_condition",
+                normalized_text,
+                chunk.boundary_after,
+            ));
+            continue;
+        }
+        let condition = condition.or(predicate_guess_cond);
         // CR 608.2c + CR 708.7: a generic "if you can't" rider attached to a
         // preceding `TurnFaceUp` must read the performed-signal, not the
         // zone-change ledger (a successful turn-up changes no zone). See the
