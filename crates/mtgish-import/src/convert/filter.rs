@@ -1565,14 +1565,6 @@ pub(crate) fn cards_to_filter(c: &crate::schema::types::Cards) -> ConvResult<Tar
             C::IsCardtypeVariable(CardtypeVariable::TheChosenCardtype) => TargetFilter::Typed(
                 TypedFilter::default().properties(vec![FilterProp::IsChosenCardType]),
             ),
-            // CR 205.2 + CR 608.2c: Gollum, Scheming Guide-style "the chosen
-            // kind" after a land/nonland library-filter choice. The choice
-            // resolver stores "Land" or "Nonland" in `last_named_choice`; the
-            // runtime filter compares that label with the candidate card's
-            // land card type.
-            C::TheChosenLibraryFilter => TargetFilter::Typed(
-                TypedFilter::default().properties(vec![FilterProp::MatchesLastChosenCardPredicate]),
-            ),
             // CR 107.3 + CR 202.1: spell/card with {X} in its mana cost.
             C::HasXInManaCost => TargetFilter::Typed(
                 TypedFilter::default().properties(vec![FilterProp::HasXInManaCost]),

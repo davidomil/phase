@@ -20384,19 +20384,19 @@ fn coiling_oracle_reveal_conditional_with_otherwise() {
             .unwrap();
 }
 
+fn collect_ability_nodes<'a>(ability: &'a AbilityDefinition, out: &mut Vec<&'a AbilityDefinition>) {
+    out.push(ability);
+    if let Some(sub) = ability.sub_ability.as_deref() {
+        collect_ability_nodes(sub, out);
+    }
+    if let Some(else_ability) = ability.else_ability.as_deref() {
+        collect_ability_nodes(else_ability, out);
+    }
+}
+
 #[test]
 fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
     use crate::types::statics::StaticMode;
-
-    fn collect<'a>(ability: &'a AbilityDefinition, out: &mut Vec<&'a AbilityDefinition>) {
-        out.push(ability);
-        if let Some(sub) = ability.sub_ability.as_deref() {
-            collect(sub, out);
-        }
-        if let Some(else_ability) = ability.else_ability.as_deref() {
-            collect(else_ability, out);
-        }
-    }
 
     let def = parse_effect_chain(
         "look at the top two cards of your library, put them back in any order, then choose land or nonland. \
@@ -20408,27 +20408,55 @@ fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
     );
 
     let mut nodes = Vec::new();
-    collect(&def, &mut nodes);
+    collect_ability_nodes(&def, &mut nodes);
     assert!(
         nodes
             .iter()
             .all(|node| !matches!(*node.effect, Effect::Unimplemented { .. })),
         "Gollum chain must not contain Unimplemented nodes: {def:#?}"
     );
+    assert!(
+        nodes.iter().any(|node| {
+            matches!(
+                node.effect.as_ref(),
+                Effect::RevealTop {
+                    player: TargetFilter::Controller,
+                    count: 1
+                }
+            )
+        }),
+        "supported Gollum wording must reveal the controller's top card: {def:#?}"
+    );
 
-    let opponent_guess = nodes
+    let choose_opponent = nodes
         .iter()
         .find(|node| {
-            node.player_scope == Some(PlayerFilter::Opponent)
+            node.player_scope.is_none()
                 && matches!(
                     node.effect.as_ref(),
                     Effect::Choose {
-                        choice_type: ChoiceType::CardPredicateGuess { .. },
+                        choice_type: ChoiceType::Opponent { restriction: None },
+                        persist: false,
                         ..
                     }
                 )
         })
-        .expect("opponent guess should lower to an opponent-scoped land/nonland guess");
+        .expect("controller should choose the single opponent who guesses");
+
+    let opponent_guess = choose_opponent
+        .sub_ability
+        .as_deref()
+        .expect("chosen opponent should make the land/nonland guess");
+    assert_eq!(
+        opponent_guess.player_scope,
+        Some(PlayerFilter::ChosenPlayer { index: 0 })
+    );
+    assert!(
+        nodes
+            .iter()
+            .all(|node| node.player_scope != Some(PlayerFilter::Opponent)),
+        "the guess must not fan out to every opponent"
+    );
     assert!(
         matches!(
             opponent_guess.effect.as_ref(),
@@ -20472,7 +20500,7 @@ fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
     );
 
     let mut else_nodes = Vec::new();
-    collect(else_branch, &mut else_nodes);
+    collect_ability_nodes(else_branch, &mut else_nodes);
     assert!(
         else_nodes.iter().any(|node| {
             matches!(
@@ -20486,6 +20514,38 @@ fn gollum_scheming_guide_guess_sequence_has_no_unimplemented() {
             )
         }),
         "otherwise branch should also make Gollum unable to be blocked: {else_branch:#?}"
+    );
+}
+
+#[test]
+fn gollum_guess_rejects_their_library_variant() {
+    let def = parse_effect_chain(
+        "look at the top two cards of your library, put them back in any order, then choose land or nonland. \
+         An opponent guesses whether the top card of their library is the chosen kind. \
+         Reveal that card. \
+         If they guessed right, remove ~ from combat.",
+        AbilityKind::Spell,
+    );
+
+    let mut nodes = Vec::new();
+    collect_ability_nodes(&def, &mut nodes);
+    assert!(
+        !nodes.iter().any(|node| {
+            matches!(
+                node.effect.as_ref(),
+                Effect::Choose {
+                    choice_type: ChoiceType::CardPredicateGuess { .. },
+                    ..
+                }
+            )
+        }),
+        "unsupported non-controller library wording must not parse as a predicate guess: {def:#?}"
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|node| matches!(node.effect.as_ref(), Effect::Unimplemented { .. })),
+        "unsupported non-controller library wording should stay honestly unsupported: {def:#?}"
     );
 }
 

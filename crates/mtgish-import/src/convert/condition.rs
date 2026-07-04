@@ -137,10 +137,6 @@ pub fn convert_ability(c: &Condition) -> ConvResult<AbilityCondition> {
         // Non-zone predicates (`AlternateCostWasPaid`, `WasKicked`, `WasForetold`,
         // `WasBargained`, etc.) need separate engine slots and strict-fail.
         Condition::CastSpellPassesFilter(spells) => spells_to_cast_zone_ability(spells)?,
-        // CR 608.2c + CR 701.20a: "If the revealed card is [the guessed
-        // library kind]" reads the last revealed card and the most recent
-        // land/nonland named choice made during the same resolution.
-        Condition::ACardWasRevealedThisWay(cards) => revealed_card_condition(cards)?,
         // CR 700.4 + CR 603.4: Morbid-style "if a creature died this turn".
         Condition::ACreatureOrPlaneswalkerDiedThisTurn(filter) => morbid_ability_condition(filter)?,
         Condition::APermanentLeftTheBattlefieldThisTurn(filter) => {
@@ -233,28 +229,6 @@ pub fn convert_ability_negated(c: &Condition) -> ConvResult<AbilityCondition> {
     Ok(AbilityCondition::Not {
         condition: Box::new(convert_ability(c)?),
     })
-}
-
-fn revealed_card_condition(cards: &Cards) -> ConvResult<AbilityCondition> {
-    match cards {
-        Cards::IsCardtype(card_type) => Ok(AbilityCondition::RevealedHasCardType {
-            card_types: vec![card_type_to_core(card_type)?],
-            additional_filter: None,
-            subtype_filter: None,
-        }),
-        Cards::TheChosenLibraryFilter => Ok(AbilityCondition::RevealedHasCardType {
-            card_types: Vec::new(),
-            additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
-            subtype_filter: None,
-        }),
-        other => Err(ConversionGap::EnginePrerequisiteMissing {
-            engine_type: "AbilityCondition::RevealedHasCardType",
-            needed_variant: format!(
-                "ACardWasRevealedThisWay(Cards::{})",
-                crate::convert::filter::cards_variant_tag(other)
-            ),
-        }),
-    }
 }
 
 /// CR 603.4: Convert an intervening-if Condition for a triggered ability.
@@ -3597,22 +3571,6 @@ mod tests {
                 },
                 comparator: Comparator::GE,
                 rhs: QuantityExpr::Fixed { value: 1 },
-            }
-        );
-    }
-
-    #[test]
-    fn revealed_chosen_library_filter_lowers_to_property_only_revealed_condition() {
-        let condition = Condition::ACardWasRevealedThisWay(Box::new(Cards::TheChosenLibraryFilter));
-
-        let converted = convert_ability(&condition).unwrap();
-
-        assert_eq!(
-            converted,
-            AbilityCondition::RevealedHasCardType {
-                card_types: Vec::new(),
-                additional_filter: Some(FilterProp::MatchesLastChosenCardPredicate),
-                subtype_filter: None,
             }
         );
     }

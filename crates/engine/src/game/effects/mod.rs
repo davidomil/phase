@@ -5849,23 +5849,30 @@ fn resolve_chain_body(
             ability.starting_with.clone(),
             controller,
         );
-        let matching_players: Vec<PlayerId> = if matches!(scope, PlayerFilter::AllExcept { .. }) {
-            // CR 608.2c + CR 109.4 + CR 608.2h: the `AllExcept` anchor may be an
-            // ability-target reference (ParentObjectTargetController), which the
-            // generic `matches_player_scope` predicate cannot resolve (it carries
-            // no `ResolvedAbility`). Route through the ability-aware
-            // `speed_effects::players_for_filter`, then re-impose APNAP order by
-            // intersecting against the apnap sequence.
-            let set =
-                crate::game::effects::speed_effects::players_for_filter(state, scope, ability);
-            apnap.into_iter().filter(|pid| set.contains(pid)).collect()
-        } else {
-            apnap
+        let matching_players: Vec<PlayerId> = match scope {
+            PlayerFilter::AllExcept { .. } => {
+                // CR 608.2c + CR 109.4 + CR 608.2h: the `AllExcept` anchor may be an
+                // ability-target reference (ParentObjectTargetController), which the
+                // generic `matches_player_scope` predicate cannot resolve (it carries
+                // no `ResolvedAbility`). Route through the ability-aware
+                // `speed_effects::players_for_filter`, then re-impose APNAP order by
+                // intersecting against the apnap sequence.
+                let set =
+                    crate::game::effects::speed_effects::players_for_filter(state, scope, ability);
+                apnap.into_iter().filter(|pid| set.contains(pid)).collect()
+            }
+            PlayerFilter::ChosenPlayer { index } => ability
+                .chosen_players
+                .get(*index as usize)
+                .copied()
+                .map(|chosen| apnap.into_iter().filter(|pid| *pid == chosen).collect())
+                .unwrap_or_default(),
+            _ => apnap
                 .into_iter()
                 .filter(|pid| {
                     matches_player_scope(state, *pid, scope, controller, ability.source_id)
                 })
-                .collect()
+                .collect(),
         };
         let (scoped_template, after_scope) = split_player_scope_chain(ability, scope);
         let after_scope_needs_linked_exile = after_scope.as_ref().is_some_and(|tail| {

@@ -6059,28 +6059,42 @@ fn try_parse_an_opponent_to_verb(
 /// choosing the predicted kind of the top card. For a public prior land/nonland
 /// choice, that is equivalent information: if the opponent predicts the revealed
 /// card's actual kind, "they guessed right"; otherwise they guessed wrong.
-fn try_parse_opponent_guesses_chosen_library_kind(text: &str) -> Option<ParsedEffectClause> {
+fn try_parse_opponent_guesses_chosen_library_kind(
+    text: &str,
+    chosen_player_index: u8,
+) -> Option<ParsedEffectClause> {
     let lower = text.trim().trim_end_matches('.').to_ascii_lowercase();
     all_consuming((
         tag::<_, _, OracleError<'_>>("an opponent guesses whether "),
-        alt((
-            tag("the top card of your library"),
-            tag("the top card of their library"),
-        )),
+        tag("the top card of your library"),
         tag(" is the chosen kind"),
     ))
     .parse(lower.as_str())
     .ok()?;
 
-    Some(parsed_clause(Effect::Choose {
-        choice_type: ChoiceType::CardPredicateGuess {
-            options: ChoiceType::land_or_nonland_card_predicate_options(),
+    let mut guess = AbilityDefinition::new(
+        AbilityKind::Spell,
+        Effect::Choose {
+            choice_type: ChoiceType::CardPredicateGuess {
+                options: ChoiceType::land_or_nonland_card_predicate_options(),
+            },
+            // `ChoiceType::CardPredicateGuess` carries source context for logging
+            // without persisting a source-card label.
+            persist: false,
+            selection: TargetSelectionMode::Chosen,
         },
-        // `ChoiceType::CardPredicateGuess` carries source context for logging
-        // without persisting a source-card label.
+    );
+    guess.player_scope = Some(PlayerFilter::ChosenPlayer {
+        index: chosen_player_index,
+    });
+
+    let mut choose_opponent = parsed_clause(Effect::Choose {
+        choice_type: ChoiceType::Opponent { restriction: None },
         persist: false,
         selection: TargetSelectionMode::Chosen,
-    }))
+    });
+    choose_opponent.sub_ability = Some(Box::new(guess));
+    Some(choose_opponent)
 }
 
 fn filter_is_bare_opponent_player(filter: &TargetFilter) -> bool {
@@ -24096,7 +24110,16 @@ pub(crate) fn parse_effect_chain_ir(
             continue;
         }
 
-        if let Some(clause) = try_parse_opponent_guesses_chosen_library_kind(&text) {
+        if let Some(clause) =
+            try_parse_opponent_guesses_chosen_library_kind(&text, ctx.chosen_player_count)
+        {
+            let chosen_scope = ControllerRef::ChosenPlayer {
+                index: ctx.chosen_player_count,
+            };
+            ctx.chosen_player_count = ctx.chosen_player_count.saturating_add(1);
+            ctx.relative_player_scope = Some(chosen_scope.clone());
+            chain_chosen_player_count = ctx.chosen_player_count;
+            chain_chosen_player_scope = Some(chosen_scope);
             clauses.push(ClauseIr {
                 parsed: clause,
                 boundary: chunk.boundary_after,
@@ -24104,7 +24127,7 @@ pub(crate) fn parse_effect_chain_ir(
                 is_optional,
                 opponent_may_scope,
                 repeat_for: repeat_for.clone(),
-                player_scope: Some(PlayerFilter::Opponent),
+                player_scope,
                 starting_with: starting_with.clone(),
                 delayed_condition: None,
                 prefix_delayed_condition: None,
