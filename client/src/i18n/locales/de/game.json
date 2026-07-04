@@ -1731,6 +1731,8 @@
       "twoColors": "Wähle zwei Farben",
       "numberRange": "Wähle eine Zahl",
       "labeled": "Triff eine Wahl",
+      "cardPredicate": "Wähle eine Kartenart",
+      "cardPredicateGuess": "Errate eine Kartenart",
       "keyword": "Wähle eine Fähigkeit",
       "counterKind": "Wähle eine Marke",
       "fallback": "Triff eine Wahl"

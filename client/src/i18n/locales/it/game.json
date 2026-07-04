@@ -1731,6 +1731,8 @@
       "twoColors": "Scegli due colori",
       "numberRange": "Scegli un numero",
       "labeled": "Fai una scelta",
+      "cardPredicate": "Scegli un tipo di carta",
+      "cardPredicateGuess": "Indovina un tipo di carta",
       "keyword": "Scegli un'abilità",
       "counterKind": "Scegli un segnalino",
       "fallback": "Fai una scelta"

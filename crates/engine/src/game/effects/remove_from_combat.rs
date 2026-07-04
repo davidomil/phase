@@ -10,7 +10,9 @@ pub fn resolve(
     events: &mut Vec<GameEvent>,
 ) -> Result<(), EffectError> {
     let targets: Vec<_> = match &ability.effect {
-        Effect::RemoveFromCombat { target } if matches!(target, TargetFilter::SelfRef) => {
+        Effect::RemoveFromCombat {
+            target: TargetFilter::SelfRef,
+        } => {
             vec![ability.source_id]
         }
         Effect::RemoveFromCombat { target } => {

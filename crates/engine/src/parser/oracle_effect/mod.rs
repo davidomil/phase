@@ -22085,10 +22085,7 @@ fn unimplemented_clause_ir(
     boundary: Option<ClauseBoundary>,
 ) -> ClauseIr {
     ClauseIr {
-        parsed: parsed_clause(Effect::Unimplemented {
-            name: name.to_string(),
-            description: None,
-        }),
+        parsed: parsed_clause(Effect::unimplemented(name, source_text)),
         boundary,
         condition: None,
         is_optional: false,
