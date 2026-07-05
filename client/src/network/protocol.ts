@@ -1,4 +1,4 @@
-import type { GameAction, GameEvent, GameState, LegalActionsResult, ManaCost } from "../adapter/types";
+import type { GameAction, GameEvent, GameLogEntry, GameState, LegalActionsResult, ManaCost } from "../adapter/types";
 import type { SeatMutation, SeatView } from "../multiplayer/seatTypes";
 
 /**
@@ -72,6 +72,7 @@ export type P2PMessage =
       type: "state_update";
       state: GameState;
       events: GameEvent[];
+      logEntries?: GameLogEntry[];
     } & LegalActionsWire)
   | { type: "action_rejected"; reason: string }
   | { type: "ping"; timestamp: number }
