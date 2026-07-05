@@ -16,6 +16,8 @@
     "holdCtrlFront": "Mantén Ctrl para la cara frontal",
     "holdCtrlFlip": "Mantén Ctrl para girar",
     "flip": "Girar",
+    "report": "Informar de un problema",
+    "reported": "Informado ✓",
     "altParsedAbilities": "Alt: habilidades analizadas",
     "debugId": "ID: {{id}}",
     "engineParse": "Análisis del motor",
@@ -80,7 +82,25 @@
     "autoPassing": "Pasando automáticamente al paso final...",
     "resolvingStack": "Resolviendo la pila..."
   },
+  "cardReport": {
+    "title": "Informar de un problema con una carta",
+    "subtitle": "Elige la carta que no funciona correctamente.",
+    "search": "Buscar cartas…",
+    "empty": "No hay cartas para informar a la vista.",
+    "zone": {
+      "Stack": "Pila",
+      "Battlefield": "Campo de batalla",
+      "Hand": "Mano",
+      "Graveyard": "Cementerio",
+      "Exile": "Exilio",
+      "Command": "Zona de mando"
+    },
+    "emblemTag": "Emblema",
+    "allPlayers": "Todos",
+    "cancel": "Cancelar"
+  },
   "board": {
+    "reportCard": "Informar de un problema con una carta",
     "regroupCreatures": "Reagrupar grupos de criaturas duplicadas",
     "changeBackground": "Cambiar fondo…",
     "customizeLayout": "Personalizar diseño…",
@@ -287,6 +307,9 @@
     "cleanupDescription": "El daño desaparece y se comprueba el tamaño máximo de la mano.",
     "tooltipStopSet": "Parada establecida: haz clic para quitar esta parada de pasar automáticamente.",
     "tooltipNoStop": "Sin parada establecida: haz clic para pausar el pasar automáticamente aquí.",
+    "scopeAllTurns": "Se detiene en cada turno.",
+    "scopeOwnTurn": "Se detiene solo en tus turnos.",
+    "scopeOpponentsTurns": "Se detiene solo en los turnos de los oponentes.",
     "tooltipCurrentPhase": "Fase actual.",
     "tooltip": "Parada de fase: {{label}}. {{description}} {{stopText}}{{activeText}}"
   },
@@ -562,6 +585,14 @@
     "paidKickedTimes": "estímulo ×{{count}}",
     "paidAdditionalCost": "coste extra",
     "paidConvoked": "convocado ×{{count}}"
+  },
+  "priorityYield": {
+    "listHeader": "Cesiones de prioridad",
+    "yieldThis": "Ceder este",
+    "yieldAllCopies": "Ceder todas las copias",
+    "revoke": "Revocar",
+    "clearAll": "Borrar todo",
+    "allCopiesHint": "Recomendado para disparos de fichas"
   },
   "targeting": {
     "choosePermanentToCopy": "Elige un permanente para copiar",
@@ -915,7 +946,8 @@
       "title": "Elegir coste de activación"
     },
     "debug": {
-      "modeBanner": "MODO DEPURACIÓN - Haz clic en cualquier carta"
+      "modeBanner": "MODO DEPURACIÓN - Haz clic en cualquier carta",
+      "modeButtonOff": "MODO CLIC DESACTIVADO"
     }
   },
   "gameProvider": {
@@ -1699,6 +1731,8 @@
       "twoColors": "Elige dos colores",
       "numberRange": "Elige un número",
       "labeled": "Toma una decisión",
+      "cardPredicate": "Elige un tipo de carta",
+      "cardPredicateGuess": "Adivina un tipo de carta",
       "keyword": "Elige una habilidad",
       "counterKind": "Elige un contador",
       "fallback": "Toma una decisión"
@@ -1877,6 +1911,11 @@
     "title": "Move {{counter}} counters",
     "subtitle": "{{source}} has {{count}} available. Remaining: {{remaining}}"
   },
+  "counterRemoval": {
+    "title": "Remove {{counter}} counters",
+    "subtitle": "{{source}} has {{count}} available. Remaining: {{remaining}}",
+    "removeLabel": "Remove"
+  },
   "coinFlip": {
     "keep": {
       "title": "Krark's Thumb",
@@ -1959,6 +1998,21 @@
       "priorityMain": "main phase",
       "priority": "priority",
       "thinking": "deciding"
+    },
+    "seat": {
+      "declareAttackers": "Declaring attackers",
+      "declareBlockers": "Declaring blockers",
+      "assigningDamage": "Assigning damage",
+      "choosingTargets": "Choosing targets",
+      "payingCost": "Paying a cost",
+      "mulligan": "Mulligan",
+      "discarding": "Discarding",
+      "orderingTriggers": "Ordering triggers",
+      "respondingToStack": "Responding",
+      "priorityCombat": "Combat",
+      "priorityMain": "Main phase",
+      "priority": "Priority",
+      "thinking": "Thinking"
     }
   }
 }

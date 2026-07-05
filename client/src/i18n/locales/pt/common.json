@@ -35,11 +35,20 @@
     "off": "Desligado"
   },
   "gameMenu": {
+    "reportCard": "Relatar uma carta",
     "menu": "Menu do jogo",
     "sandboxTools": "Ferramentas de Sandbox",
     "sandboxToolsTitle": "Ferramentas de Sandbox — configure qualquer estado de tabuleiro (`)",
+    "openSandboxTools": "Abrir Ferramentas de Sandbox",
+    "clickModeButton": "Botão de modo de clique",
+    "shown": "Visível",
+    "hidden": "Oculto",
     "resume": "Continuar",
     "settings": "Configurações",
+    "boardLayoutSplit": "Dividido",
+    "boardLayoutLegacy": "Legacy",
+    "switchToSplitView": "Alternar para visualização de mesa dividida",
+    "switchToLegacyView": "Alternar para visualização legacy focada",
     "helpShortcuts": "Ajuda e Atalhos",
     "showAiHand": "Mostrar Mão da IA",
     "hideAiHand": "Ocultar Mão da IA",
@@ -228,5 +237,16 @@
     "settings": "Configurações",
     "languageSettings": "Idioma ({{lang}}) — abrir configurações",
     "languageTitle": "Idioma: {{lang}}"
+  },
+  "errorBoundary": {
+    "heading": "Algo deu errado",
+    "body": "O aplicativo encontrou um erro inesperado e não pode continuar nesta tela. Recarregar geralmente resolve.",
+    "reload": "Recarregar"
+  },
+  "actionError": {
+    "title": "{{action}} falhou",
+    "skipTarget": "Pular alvo",
+    "genericAction": "Ação",
+    "unknownEngineError": "Erro desconhecido do motor"
   }
 }

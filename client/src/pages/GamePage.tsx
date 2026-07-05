@@ -37,6 +37,7 @@ import { BlockRequirementBadges } from "../components/combat/BlockRequirementBad
 import { GameBoard } from "../components/board/GameBoard.tsx";
 import { CardImage } from "../components/card/CardImage.tsx";
 import { GameCardPreview } from "../components/card/GameCardPreview.tsx";
+import { CardReportDialog } from "../components/card/CardReportDialog.tsx";
 import { ActionButton } from "../components/board/ActionButton.tsx";
 import { FullControlToggle } from "../components/controls/FullControlToggle.tsx";
 import { CombatPhaseIndicator } from "../components/controls/PhaseStopBar.tsx";
@@ -833,13 +834,21 @@ function GamePageContent({
   const playerId = usePlayerId();
   const perspectivePlayerId = usePerspectivePlayerId();
   const isSpectatorMode = useSpectatorMode();
+  // Card-report picker is valid in a live, participating game (never spectate).
+  const canReportCard = gameState != null && !isSpectatorMode;
   const canActForWaitingState = useCanActForWaitingState();
   const helpSheetOpen = useUiStore((s) => s.helpSheetOpen);
   const setHelpSheetOpen = useUiStore((s) => s.setHelpSheetOpen);
   const dismissedFlowHelpNudge = usePreferencesStore((s) => s.dismissedFlowHelpNudge);
   const dismissedSandboxToolsNudge = usePreferencesStore((s) => s.dismissedSandboxToolsNudge);
   const multiplayerBoardLayout = usePreferencesStore((s) => s.multiplayerBoardLayout);
+  const setMultiplayerBoardLayout = usePreferencesStore((s) => s.setMultiplayerBoardLayout);
   const debugPanelOpen = useUiStore((s) => s.debugPanelOpen);
+  const debugInteractionMode = useUiStore((s) => s.debugInteractionMode);
+  const debugClickModeButtonVisible = useUiStore((s) => s.debugClickModeButtonVisible);
+  const toggleDebugClickModeButtonVisible = useUiStore(
+    (s) => s.toggleDebugClickModeButtonVisible,
+  );
   const opponentDisplayName = useMultiplayerStore((s) => s.opponentDisplayName);
   const adapter = useGameStore((s) => s.adapter);
   const focusedOpponent = useUiStore((s) => s.focusedOpponent);
@@ -854,6 +863,9 @@ function GamePageContent({
     multiplayerBoardLayout,
     seatCount,
   );
+  const handleToggleMultiplayerBoardLayout = useCallback(() => {
+    setMultiplayerBoardLayout(multiplayerBoardLayout === "split" ? "focused" : "split");
+  }, [multiplayerBoardLayout, setMultiplayerBoardLayout]);
   const gridTemplateRows = splitBoardActive ? splitGridTemplateRows : focusedGridTemplateRows;
   const handleKickPlayer = useCallback((pid: number) => {
     const adapter = useGameStore.getState().adapter as
@@ -1107,8 +1119,6 @@ function GamePageContent({
   const gamePageStyle = {
     "--game-top-overlay-offset": `${topOverlayOffsetPx}px`,
     "--game-split-safe-top": "0px",
-    "--game-top-controls-height": isMobile ? "3.75rem" : "4.25rem",
-    "--game-top-controls-width": isMobile ? "11rem" : "13.25rem",
     "--game-targeting-prompt-top": splitBoardActive
       ? isMobile ? "4.25rem" : "4.75rem"
       : "0.25rem",
@@ -1412,14 +1422,22 @@ function GamePageContent({
         isOnlineMode={isOnlineMode}
         showAiHand={showAiHand}
         onToggleAiHand={() => setShowAiHand((v) => !v)}
+        multiplayerBoardLayout={seatCount > 2 ? multiplayerBoardLayout : undefined}
+        onToggleMultiplayerBoardLayout={seatCount > 2 ? handleToggleMultiplayerBoardLayout : undefined}
         onSettingsClick={() => setPreferencesOpen({})}
         onHelpClick={() => setHelpSheetOpen(true)}
         onConcede={onShowConcedeDialog}
         onRequestTakeback={isOnlineMode ? handleRequestTakeback : undefined}
         showSandboxTools={mode === "ai" || mode === "local" || isSandboxGame}
         onSandboxToolsClick={() => useUiStore.getState().openSandboxTools()}
+        debugInteractionMode={debugInteractionMode}
+        debugClickModeButtonVisible={debugClickModeButtonVisible}
+        onToggleDebugClickModeButtonVisible={toggleDebugClickModeButtonVisible}
+        showReportCard={canReportCard}
+        onReportCardClick={() => useUiStore.getState().openCardReportDialog()}
       />
       <HelpSheet />
+      <CardReportDialog />
 
       {/* Connection failure toast */}
       {isOnlineMode && (
@@ -1567,6 +1585,9 @@ function GamePageContent({
           onCustomizeLayout={() => useUiStore.getState().setFlexEditMode(true)}
           onToggleGameLog={() => useUiStore.getState().toggleLogPanel()}
           onToggleDebugLog={() => useUiStore.getState().toggleDebugPanel()}
+          onReportCard={
+            canReportCard ? () => useUiStore.getState().openCardReportDialog() : undefined
+          }
         />
       )}
 
@@ -3179,17 +3200,23 @@ function ActivationCostOneOfChoiceModal() {
 function DebugModeBanner() {
   const { t } = useTranslation("game");
   const active = useUiStore((s) => s.debugInteractionMode);
+  const visible = useUiStore((s) => s.debugClickModeButtonVisible);
   const toggle = useUiStore((s) => s.toggleDebugInteractionMode);
 
-  if (!active) return null;
+  if (!active && !visible) return null;
 
   return (
     <div className="fixed left-1/2 top-2 z-50 -translate-x-1/2">
       <button
         onClick={toggle}
-        className="rounded-full border border-amber-500/40 bg-amber-950/80 px-4 py-1.5 font-mono text-xs font-semibold text-amber-300 shadow-lg backdrop-blur-sm transition-colors hover:bg-amber-900/80"
+        className={
+          "rounded-full border px-4 py-1.5 font-mono text-xs font-semibold shadow-lg backdrop-blur-sm transition-colors " +
+          (active
+            ? "border-amber-500/40 bg-amber-950/80 text-amber-300 hover:bg-amber-900/80"
+            : "border-gray-600/50 bg-gray-950/75 text-gray-400 hover:border-amber-600/50 hover:text-amber-300")
+        }
       >
-        {t("gamePage.debug.modeBanner")}
+        {active ? t("gamePage.debug.modeBanner") : t("gamePage.debug.modeButtonOff")}
       </button>
     </div>
   );

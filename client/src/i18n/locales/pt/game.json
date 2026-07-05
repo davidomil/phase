@@ -16,6 +16,8 @@
     "holdCtrlFront": "Segure Ctrl para a face dianteira",
     "holdCtrlFlip": "Segure Ctrl para virar",
     "flip": "Virar",
+    "report": "Relatar um problema",
+    "reported": "Relatado ✓",
     "altParsedAbilities": "Alt: habilidades processadas",
     "debugId": "ID: {{id}}",
     "engineParse": "Análise do Motor",
@@ -80,7 +82,25 @@
     "autoPassing": "Passando Automaticamente até a Etapa Final...",
     "resolvingStack": "Resolvendo a Pilha..."
   },
+  "cardReport": {
+    "title": "Relatar um problema com uma carta",
+    "subtitle": "Escolha a carta que não está funcionando corretamente.",
+    "search": "Buscar cartas…",
+    "empty": "Nenhuma carta relatável à vista.",
+    "zone": {
+      "Stack": "Pilha",
+      "Battlefield": "Campo de batalha",
+      "Hand": "Mão",
+      "Graveyard": "Cemitério",
+      "Exile": "Exílio",
+      "Command": "Zona de comando"
+    },
+    "emblemTag": "Emblema",
+    "allPlayers": "Todos",
+    "cancel": "Cancelar"
+  },
   "board": {
+    "reportCard": "Relatar um problema com uma carta",
     "regroupCreatures": "Reagrupar grupos de criaturas duplicadas",
     "changeBackground": "Alterar plano de fundo…",
     "customizeLayout": "Personalizar layout…",
@@ -287,6 +307,9 @@
     "cleanupDescription": "O dano se dissipa e o tamanho máximo da mão é verificado.",
     "tooltipStopSet": "Parada definida: clique para remover esta parada de passe automático.",
     "tooltipNoStop": "Nenhuma parada definida: clique para pausar o passe automático aqui.",
+    "scopeAllTurns": "Para em todos os turnos.",
+    "scopeOwnTurn": "Para apenas nos seus turnos.",
+    "scopeOpponentsTurns": "Para apenas nos turnos dos oponentes.",
     "tooltipCurrentPhase": "Fase atual.",
     "tooltip": "Parada de fase: {{label}}. {{description}} {{stopText}}{{activeText}}"
   },
@@ -562,6 +585,14 @@
     "paidKickedTimes": "kicker ×{{count}}",
     "paidAdditionalCost": "custo extra",
     "paidConvoked": "convocadas ×{{count}}"
+  },
+  "priorityYield": {
+    "listHeader": "Cessões de prioridade",
+    "yieldThis": "Ceder este",
+    "yieldAllCopies": "Ceder todas as cópias",
+    "revoke": "Revogar",
+    "clearAll": "Limpar tudo",
+    "allCopiesHint": "Recomendado para gatilhos de fichas"
   },
   "targeting": {
     "choosePermanentToCopy": "Escolha um permanente para copiar",
@@ -915,7 +946,8 @@
       "title": "Escolher Custo de Ativação"
     },
     "debug": {
-      "modeBanner": "MODO DE DEPURAÇÃO - Clique em qualquer carta"
+      "modeBanner": "MODO DE DEPURAÇÃO - Clique em qualquer carta",
+      "modeButtonOff": "MODO DE CLIQUE DESLIGADO"
     }
   },
   "gameProvider": {
@@ -1699,6 +1731,8 @@
       "twoColors": "Escolha Duas Cores",
       "numberRange": "Escolha um Número",
       "labeled": "Faça uma Escolha",
+      "cardPredicate": "Escolha um Tipo de Carta",
+      "cardPredicateGuess": "Adivinhe um Tipo de Carta",
       "keyword": "Escolha uma Habilidade",
       "counterKind": "Escolha um Marcador",
       "fallback": "Faça uma Escolha"
@@ -1877,6 +1911,11 @@
     "title": "Move {{counter}} counters",
     "subtitle": "{{source}} has {{count}} available. Remaining: {{remaining}}"
   },
+  "counterRemoval": {
+    "title": "Remove {{counter}} counters",
+    "subtitle": "{{source}} has {{count}} available. Remaining: {{remaining}}",
+    "removeLabel": "Remove"
+  },
   "coinFlip": {
     "keep": {
       "title": "Krark's Thumb",
@@ -1959,6 +1998,21 @@
       "priorityMain": "main phase",
       "priority": "priority",
       "thinking": "deciding"
+    },
+    "seat": {
+      "declareAttackers": "Declaring attackers",
+      "declareBlockers": "Declaring blockers",
+      "assigningDamage": "Assigning damage",
+      "choosingTargets": "Choosing targets",
+      "payingCost": "Paying a cost",
+      "mulligan": "Mulligan",
+      "discarding": "Discarding",
+      "orderingTriggers": "Ordering triggers",
+      "respondingToStack": "Responding",
+      "priorityCombat": "Combat",
+      "priorityMain": "Main phase",
+      "priority": "Priority",
+      "thinking": "Thinking"
     }
   }
 }
