@@ -7183,9 +7183,9 @@ mod tests {
     use crate::schema::types::{
         CardInGraveyard, Cards, CardtypeVariable, ChoosableColor, Color, ColorList, Comparison,
         Condition, Cost, CounterType, CreatableToken, CreatureTokenSubtypes, CreatureTokenType,
-        DamageSources, Expiration, LayerEffect, LookAtTopOfLibraryAction, ManaProduce, ManaSymbol,
-        PTXValue, Permanent, PermanentRule, Permanents, Protectable, ProtectableColor,
-        ReplacementActionWouldEnter, Rule, SubType, TokenCopyEffects, TokenFlag, PT,
+        DamageSources, Expiration, LayerEffect, ManaProduce, ManaSymbol, PTXValue, Permanent,
+        Permanents, Protectable, ProtectableColor, ReplacementActionWouldEnter, Rule, SubType,
+        TokenCopyEffects, TokenFlag, PT,
     };
     use engine::types::ability::{
         AbilityKind, ChoiceType, Comparator, ContinuousModification, ControllerRef, Effect,
@@ -7194,18 +7194,6 @@ mod tests {
     use engine::types::card_type::CoreType;
     use engine::types::keywords::{HexproofFilter, Keyword, ProtectionTarget};
     use engine::types::mana::ManaColor;
-
-    fn assert_no_unimplemented_ability(def: &AbilityDefinition) {
-        if let Effect::Unimplemented { .. } = def.effect.as_ref() {
-            panic!("unexpected Unimplemented effect in ability chain: {def:?}");
-        }
-        if let Some(sub) = &def.sub_ability {
-            assert_no_unimplemented_ability(sub);
-        }
-        if let Some(else_ability) = &def.else_ability {
-            assert_no_unimplemented_ability(else_ability);
-        }
-    }
 
     // Issue #4201 follow-up — Turnabout's "choose artifact, creature, or
     // land" spell action (`Action::ChooseACardtypeFromList`, the
