@@ -14,7 +14,9 @@
 use engine::game::combat::{can_block_pair, AttackTarget};
 use engine::game::scenario::{GameRunner, GameScenario, P0, P1};
 use engine::parser::oracle::parse_oracle_text;
-use engine::types::ability::{AbilityCondition, ChoiceType, Effect, FilterProp, PlayerFilter};
+use engine::types::ability::{
+    AbilityCondition, ChoiceType, Effect, FilterProp, PlayerFilter, TargetRef,
+};
 use engine::types::actions::GameAction;
 use engine::types::card_type::CoreType;
 use engine::types::events::GameEvent;
@@ -299,6 +301,23 @@ fn is_attacking(runner: &GameRunner, attacker: ObjectId) -> bool {
     })
 }
 
+fn drive_combat_damage_with_no_blocks(runner: &mut GameRunner) -> Vec<GameEvent> {
+    if matches!(runner.state().waiting_for, WaitingFor::Priority { .. }) {
+        pass_priority_round(runner);
+    }
+    if matches!(
+        runner.state().waiting_for,
+        WaitingFor::DeclareBlockers { .. }
+    ) {
+        runner
+            .act(GameAction::DeclareBlockers {
+                assignments: vec![],
+            })
+            .expect("declaring no blockers should succeed");
+    }
+    runner.combat_damage().events().to_vec()
+}
+
 fn resolve_gollum_choices(
     runner: &mut GameRunner,
     preferred_top: ObjectId,
@@ -319,8 +338,10 @@ fn gollum_attack_trigger_removes_him_from_combat_when_guess_is_right() {
     attack_with_gollum(&mut runner, gollum);
 
     let hand_before = runner.state().players[0].hand.len();
+    let defender_life_before = runner.state().players[P1.0 as usize].life;
     let events = resolve_gollum_choices(&mut runner, top, "Land", "Land");
     runner.advance_until_stack_empty();
+    let combat_events = drive_combat_damage_with_no_blocks(&mut runner);
 
     assert!(
         events.iter().any(|event| matches!(
@@ -342,6 +363,23 @@ fn gollum_attack_trigger_removes_him_from_combat_when_guess_is_right() {
         hand_before,
         "the correct-guess branch must not draw a card"
     );
+    assert_eq!(
+        runner.state().players[P1.0 as usize].life,
+        defender_life_before,
+        "removed-from-combat Gollum must not deal combat damage"
+    );
+    assert!(
+        !combat_events.iter().any(|event| matches!(
+            event,
+            GameEvent::DamageDealt {
+                source_id,
+                target: TargetRef::Player(P1),
+                is_combat: true,
+                ..
+            } if *source_id == gollum
+        )),
+        "removed-from-combat Gollum must not emit combat damage events"
+    );
     assert!(
         runner
             .state()
@@ -360,6 +398,7 @@ fn gollum_attack_trigger_draws_and_cannot_be_blocked_when_guess_is_wrong() {
     attack_with_gollum(&mut runner, gollum);
 
     let hand_before = runner.state().players[0].hand.len();
+    let defender_life_before = runner.state().players[P1.0 as usize].life;
     let events = resolve_gollum_choices(&mut runner, top, "Land", "Nonland");
     runner.advance_until_stack_empty();
 
@@ -401,6 +440,26 @@ fn gollum_attack_trigger_draws_and_cannot_be_blocked_when_guess_is_wrong() {
     assert!(
         !can_block_pair(runner.state(), blocker, gollum),
         "Gollum should not be a legal block target after the wrong-guess branch"
+    );
+
+    let combat_events = drive_combat_damage_with_no_blocks(&mut runner);
+    assert_eq!(
+        runner.state().players[P1.0 as usize].life,
+        defender_life_before - 2,
+        "wrong-guess branch must leave Gollum attacking so he deals 2 combat damage"
+    );
+    assert!(
+        combat_events.iter().any(|event| matches!(
+            event,
+            GameEvent::DamageDealt {
+                source_id,
+                target: TargetRef::Player(P1),
+                amount: 2,
+                is_combat: true,
+                ..
+            } if *source_id == gollum
+        )),
+        "wrong-guess branch must emit Gollum's combat damage event, got {combat_events:?}"
     );
 }
 

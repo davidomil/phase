@@ -250,9 +250,16 @@ fn random_card_predicate_guess(
         return None;
     }
     let index = rng.random_range(0..options.len());
-    Some(GameAction::ChooseOption {
-        choice: options[index].clone(),
-    })
+    let choice = options[index].clone();
+    tracing::info!(
+        target: "phase_ai::choice",
+        ai_player = ai_player.0,
+        source_id = source_id.0,
+        source_name = %source.name,
+        guess = %choice,
+        "AI randomly guessed card predicate"
+    );
+    Some(GameAction::ChooseOption { choice })
 }
 
 fn fast_priority_action(state: &GameState, ai_player: PlayerId) -> Option<GameAction> {

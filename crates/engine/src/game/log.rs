@@ -276,7 +276,7 @@ fn format_segments(event: &GameEvent, state: &GameState) -> Vec<LogSegment> {
         } => {
             let mut segments = vec![
                 player_seg(state, *player_id),
-                text(" guesses card kind "),
+                text(" guesses "),
                 text(choice),
             ];
             if let Some(source_id) = source_id {
@@ -1339,15 +1339,19 @@ mod tests {
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category, LogCategory::Debug);
-        assert!(entries[0].segments.iter().any(
-            |segment| matches!(segment, LogSegment::Text(text) if text == " guesses card kind ")
-        ));
-        assert!(entries[0]
-            .segments
-            .iter()
-            .any(|segment| matches!(segment, LogSegment::Text(text) if text == "Nonland")));
-        assert!(entries[0].segments.iter().any(
-            |segment| matches!(segment, LogSegment::CardName { name, .. } if name == "Gollum, Scheming Guide")
+        assert!(matches!(
+            entries[0].segments.as_slice(),
+            [
+                LogSegment::PlayerName { player_id, .. },
+                LogSegment::Text(guesses),
+                LogSegment::Text(choice),
+                LogSegment::Text(for_text),
+                LogSegment::CardName { name, .. },
+            ] if *player_id == PlayerId(1)
+                && guesses == " guesses "
+                && choice == "Nonland"
+                && for_text == " for "
+                && name == "Gollum, Scheming Guide"
         ));
     }
 

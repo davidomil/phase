@@ -86,7 +86,7 @@ export type WsAdapterEvent =
   | { type: "reconnecting"; attempt: number; maxAttempts: number }
   | { type: "reconnected" }
   | { type: "reconnectFailed" }
-  | { type: "stateChanged"; state: GameState; events: GameEvent[]; legalResult: LegalActionsResult }
+  | { type: "stateChanged"; state: GameState; events: GameEvent[]; legalResult: LegalActionsResult; logEntries?: GameLogEntry[] }
   | { type: "emoteReceived"; fromPlayer: PlayerId; emote: string }
   | { type: "conceded"; player: PlayerId }
   | { type: "timerUpdate"; player: PlayerId; remainingSeconds: number }
@@ -687,7 +687,13 @@ export class WebSocketAdapter implements EngineAdapter {
           this.pendingResolve = null;
           this.pendingReject = null;
         } else {
-          this.emit({ type: "stateChanged", state: data.state, events: data.events, legalResult: this._legalActions });
+          this.emit({
+            type: "stateChanged",
+            state: data.state,
+            events: data.events,
+            legalResult: this._legalActions,
+            logEntries: data.log_entries,
+          });
         }
         break;
       }

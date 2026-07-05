@@ -129,13 +129,20 @@ describe("WebSocketAdapter", () => {
 
       const mockState = createMockState();
       const mockEvents = [{ type: "DrawCard", data: { player: 0, object_id: 1 } }];
+      const mockLogEntries = [{
+        seq: 0,
+        turn: 1,
+        phase: "PreCombatMain",
+        category: "Debug",
+        segments: [{ type: "Text", value: "AI guesses Land" }],
+      }];
 
       // Simulate an unsolicited StateUpdate (no pending action)
       ws.dispatchSynthetic(
         "message",
         JSON.stringify({
           type: "StateUpdate",
-          data: { state: mockState, events: mockEvents },
+          data: { state: mockState, events: mockEvents, log_entries: mockLogEntries },
         }),
       );
 
@@ -144,6 +151,7 @@ describe("WebSocketAdapter", () => {
           type: "stateChanged",
           state: mockState,
           events: mockEvents,
+          logEntries: mockLogEntries,
         }),
       );
     });
