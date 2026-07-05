@@ -1202,7 +1202,8 @@ fn evaluate_condition_with_context(
             | crate::types::ability::ObjectScope::Anaphoric
             // Never produced for a duration tap condition; fails safely.
             | crate::types::ability::ObjectScope::OtherRevealedCard
-            | crate::types::ability::ObjectScope::Demonstrative => false,
+            | crate::types::ability::ObjectScope::Demonstrative
+            | crate::types::ability::ObjectScope::AmassedArmy => false,
         },
         // CR 702.171b + CR 110.5d: off-battlefield permanents have no saddled designation.
         StaticCondition::SourceIsSaddled => state.objects.get(&source_id).is_some_and(|obj| {

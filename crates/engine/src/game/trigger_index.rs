@@ -466,6 +466,7 @@ pub(crate) fn keys_from_event(event: &GameEvent, state: &GameState) -> Keys {
         GameEvent::StickerPlaced { .. } => {}
         GameEvent::CreatureExerted { .. } => push(TriggerEventKey::Exerted),
         GameEvent::CreatureEnlisted { .. } => push(TriggerEventKey::Enlisted),
+        GameEvent::ArmyAmassed { .. } => {}
         GameEvent::Foretold { .. } => push(TriggerEventKey::Foretold),
         // CR 702.143c: "becomes foretold" via an effect is NOT the foretell
         // special action, so it produces no trigger key (a "whenever you

@@ -329,6 +329,14 @@ pub enum GameEvent {
         tapped: ObjectId,
         tapped_snapshot: Box<CostPaidObjectSnapshot>,
     },
+    /// CR 701.47c: An amass instruction chose an Army creature. This event is
+    /// observational; the resolving ability carries the authoritative
+    /// `amassed_army_object` snapshot for later CR 701.47c references.
+    ArmyAmassed {
+        object_id: ObjectId,
+        source_id: ObjectId,
+        controller: PlayerId,
+    },
     /// CR 702.143a: A player foretold a card from their hand.
     Foretold {
         player_id: PlayerId,
