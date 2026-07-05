@@ -1206,6 +1206,10 @@ pub struct PendingChooseOneOf {
     pub parent_targets: Vec<TargetRef>,
     #[serde(default)]
     pub context: super::ability::SpellContext,
+    /// CR 614.5 + CR 616.1f: replacement effects already applied to the event
+    /// that produced this queued branch choice.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub replacement_applied: HashSet<ReplacementId>,
     pub remaining_players: Vec<PlayerId>,
 }
 
@@ -2100,6 +2104,12 @@ pub struct PendingManaAbility {
     pub player: PlayerId,
     pub source_id: ObjectId,
     pub ability_index: usize,
+    /// CR 605.3b + CR 400.7: Mana ability choices can be answered after the
+    /// source paid a cost that moved it out of existence (Treasure tokens, etc.).
+    /// Preserve the activated ability definition from activation time so the
+    /// chosen-color resume can resolve from LKI even when `source_id` is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ability_snapshot: Option<AbilityDefinition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_override: Option<ProductionOverride>,
     pub resume: ManaAbilityResume,
@@ -3375,6 +3385,10 @@ pub enum WaitingFor {
         parent_targets: Vec<TargetRef>,
         #[serde(default)]
         context: super::ability::SpellContext,
+        /// CR 614.5 + CR 616.1f: replacement effects already applied to the
+        /// event that produced this choice.
+        #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+        replacement_applied: HashSet<ReplacementId>,
         /// Players still to face the same choice in APNAP order (CR 701.55d).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         remaining_players: Vec<PlayerId>,
@@ -5994,6 +6008,11 @@ pub struct GameState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_replacement_source: Option<crate::types::identifiers::ObjectId>,
 
+    /// CR 614.5 + CR 616.1f: replacement identities already applied to the
+    /// event that produced a deferred post-replacement continuation.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub post_replacement_applied: HashSet<ReplacementId>,
+
     /// CR 615.5 + CR 609.7: Source object of the *prevented event itself*
     /// (e.g. the damage dealer in a damage-prevention replacement) — distinct
     /// from `post_replacement_source` (which is the replacement's own source,
@@ -8075,6 +8094,7 @@ impl GameState {
             legacy_post_replacement_effect: None,
             legacy_post_replacement_resolved_effect: None,
             post_replacement_source: None,
+            post_replacement_applied: HashSet::new(),
             post_replacement_event_source: None,
             post_replacement_event_target: None,
             post_replacement_token_choice_applied: None,
@@ -9575,6 +9595,7 @@ mod tests {
             branch_descriptions: vec!["Draw a card.".to_string()],
             parent_targets: vec![],
             context: crate::types::ability::SpellContext::default(),
+            replacement_applied: Default::default(),
             remaining_players: vec![],
         }));
         variants.push(Box::new(WaitingFor::TriggerTargetSelection {
@@ -9854,6 +9875,7 @@ mod tests {
                     player: PlayerId(0),
                     source_id: ObjectId(1),
                     ability_index: 0,
+                    ability_snapshot: None,
                     color_override: None,
                     resume: ManaAbilityResume::Priority,
                     chosen_tappers: Vec::new(),
