@@ -1648,6 +1648,17 @@ pub enum PendingCounterPostAction {
         object_id: ObjectId,
         subtype: String,
     },
+    ContinueAmassAfterTokenCreation {
+        controller: PlayerId,
+        subtype: String,
+        count: u32,
+        ability: Box<ResolvedAbility>,
+    },
+    FinalizeAmass {
+        object_id: ObjectId,
+        subtype: String,
+        ability: Box<ResolvedAbility>,
+    },
     InjectPredefinedTokenAbilities {
         object_id: ObjectId,
     },

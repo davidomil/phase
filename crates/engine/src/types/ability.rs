@@ -4450,6 +4450,12 @@ pub enum ObjectScope {
     /// Drain class (issue #511): a reveal/counter/reanimate earlier in the same
     /// ability binds "that <type>'s" to the referenced object.
     Demonstrative,
+    /// CR 701.47c + CR 608.2c: The Army creature chosen by the current amass
+    /// instruction. "The Army you amassed" and "the amassed Army" refer to
+    /// that chosen creature even if it didn't receive counters. This is
+    /// resolution-local state carried by `ResolvedAbility.amassed_army_object`,
+    /// not the generic demonstrative/effect-context slot.
+    AmassedArmy,
     /// CR 603.2 + CR 120.1: The object that **received** the damage referenced
     /// by the current trigger event — the recipient counterpart to
     /// [`ObjectScope::EventSource`]. This is "that creature" in "deals
@@ -18674,6 +18680,12 @@ pub struct ResolvedAbility {
     /// instructions may still refer to it after it left its zone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_context_object: Option<CostPaidObjectSnapshot>,
+    /// CR 701.47c + CR 608.2c: Public characteristics of the Army chosen by
+    /// the most recent amass instruction in this resolving ability. Carried
+    /// separately from `effect_context_object` so generic demonstratives never
+    /// accidentally bind to an amass-specific referent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amassed_army_object: Option<CostPaidObjectSnapshot>,
     /// CR 603.4: Index of the printed ability this resolution came from on the
     /// source object's ability list. Identifies "this ability" for per-turn
     /// resolution tracking (`AbilityCondition::NthResolutionThisTurn`). `None` for
@@ -18787,6 +18799,7 @@ impl ResolvedAbility {
             chosen_x: None,
             cost_paid_object: None,
             effect_context_object: None,
+            amassed_army_object: None,
             ability_index: None,
             may_trigger_origin: None,
             target_selection_mode: TargetSelectionMode::Chosen,
@@ -18903,6 +18916,18 @@ impl ResolvedAbility {
         }
         if let Some(else_branch) = self.else_ability.as_mut() {
             else_branch.set_effect_context_object_recursive(snapshot);
+        }
+    }
+
+    /// CR 701.47c + CR 608.2c: Stamp the Army chosen by an amass instruction
+    /// across every continuation branch in this resolution.
+    pub fn set_amassed_army_object_recursive(&mut self, snapshot: CostPaidObjectSnapshot) {
+        self.amassed_army_object = Some(snapshot.clone());
+        if let Some(sub) = self.sub_ability.as_mut() {
+            sub.set_amassed_army_object_recursive(snapshot.clone());
+        }
+        if let Some(else_branch) = self.else_ability.as_mut() {
+            else_branch.set_amassed_army_object_recursive(snapshot);
         }
     }
 

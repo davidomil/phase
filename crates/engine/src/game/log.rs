@@ -179,7 +179,7 @@ fn categorize(event: &GameEvent) -> LogCategory {
         | GameEvent::Augmented { .. }
         | GameEvent::BecomesPlotted { .. } => LogCategory::State,
 
-        GameEvent::SpeedChanged { .. } => LogCategory::Special,
+        GameEvent::SpeedChanged { .. } | GameEvent::ArmyAmassed { .. } => LogCategory::Special,
 
         GameEvent::TokenCreated { .. } | GameEvent::ObjectConjured { .. } => LogCategory::Token,
 
@@ -358,6 +358,10 @@ fn format_segments(event: &GameEvent, state: &GameState) -> Vec<LogSegment> {
             text(" enlists "),
             card_seg(state, *tapped),
         ],
+
+        GameEvent::ArmyAmassed { object_id, .. } => {
+            vec![card_seg(state, *object_id), text(" is amassed")]
+        }
 
         GameEvent::StackPushed { object_id } => {
             vec![card_seg(state, *object_id), text(" added to stack")]
