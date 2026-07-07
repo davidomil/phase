@@ -18,6 +18,7 @@ import { PhaseIndicatorLeft, PhaseIndicatorRight } from "../controls/PhaseStopBa
 import { CityBlessingBadge, ConditionBadge, CounterBadge, DungeonBadge, familyOf, InitiativeBadge, MonarchBadge, PendingSpellBadge, RingBenefitsBadge, StatusBadge, UnboundedBadge } from "./HudBadges.tsx";
 import { EnchantmentsBadge } from "./EnchantmentsBadge.tsx";
 import { HudPlate } from "./HudPlate.tsx";
+import { NextUpBadge } from "./NextUpBadge.tsx";
 
 export function PlayerHud() {
   const { t } = useTranslation("game");
@@ -100,6 +101,7 @@ export function PlayerHud() {
         hasPendingDecision={waitingSeatId === playerId}
         density={compact ? "compact" : "default"}
         onClick={isValidTarget ? handleTargetClick : undefined}
+        cornerBadge={<NextUpBadge playerId={playerId} compact={compact} />}
         trailing={
           <>
             <EnchantmentsBadge playerId={playerId} />
