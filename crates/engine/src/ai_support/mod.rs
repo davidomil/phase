@@ -8,12 +8,16 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 
 use crate::game::casting;
+use crate::game::casting_costs;
 use crate::game::layers;
 use crate::game::mana_abilities;
+use crate::game::mana_payment;
 use crate::game::mana_sources;
+use crate::game::triggers;
 use crate::types::ability::{AbilityKind, CounterCostSelection, TriggerDefinition};
 use crate::types::actions::GameAction;
 use crate::types::card_type::CoreType;
+use crate::types::events::{GameEvent, ManaTapState};
 use crate::types::game_state::{
     CastOfferKind, GameState, MulliganDecisionPhase, PayCostKind, PendingMulliganAction, WaitingFor,
 };
@@ -754,6 +758,190 @@ fn activate_ability_is_meaningful_priority(
     })
 }
 
+fn land_mana_options_for_priority(
+    state: &GameState,
+    player: PlayerId,
+    object_id: ObjectId,
+    aura_sources: &[ObjectId],
+    mana_activation_gates: &mana_abilities::ManaActivationGates,
+) -> Vec<mana_sources::ManaSourceOption> {
+    mana_sources::activatable_land_mana_options_indexed_gated(
+        state,
+        object_id,
+        player,
+        aura_sources,
+        mana_activation_gates,
+    )
+}
+
+fn resolve_mana_option_for_trigger_probe(
+    state: &GameState,
+    player: PlayerId,
+    option: &mana_sources::ManaSourceOption,
+) -> bool {
+    let mut probe = state.clone();
+    let mut events = Vec::new();
+
+    for (aura_id, override_value) in &option.taps_for_mana_overrides {
+        probe
+            .pending_taps_for_mana_overrides
+            .insert(*aura_id, override_value.clone());
+    }
+
+    if let Some(ability_index) = option.ability_index {
+        let Some(ability_def) = probe
+            .objects
+            .get(&option.object_id)
+            .and_then(|obj| obj.abilities.get(ability_index))
+            .cloned()
+        else {
+            return false;
+        };
+        let override_value = casting_costs::production_override_for_option(&ability_def, option);
+        if mana_abilities::resolve_mana_ability(
+            &mut probe,
+            option.object_id,
+            player,
+            &ability_def,
+            &mut events,
+            override_value,
+        )
+        .is_err()
+        {
+            return false;
+        }
+    } else {
+        if let Some(obj) = probe.objects.get_mut(&option.object_id) {
+            if !obj.tapped {
+                obj.tapped = true;
+                events.push(GameEvent::PermanentTapped {
+                    object_id: option.object_id,
+                    caused_by: None,
+                });
+            }
+        }
+        mana_payment::produce_mana(
+            &mut probe,
+            option.object_id,
+            option.mana_type,
+            player,
+            true,
+            &mut events,
+        );
+        events.push(GameEvent::TappedForMana {
+            player_id: player,
+            source_id: option.object_id,
+            produced: vec![option.mana_type],
+            tap_state: ManaTapState::FromTap,
+        });
+    }
+
+    triggers::events_would_queue_non_mana_trigger(&mut probe, &events)
+}
+
+fn activate_mana_action_would_queue_non_mana_trigger(
+    state: &GameState,
+    player: PlayerId,
+    source_id: ObjectId,
+    ability_index: usize,
+    aura_sources: &[ObjectId],
+    mana_activation_gates: &mana_abilities::ManaActivationGates,
+) -> bool {
+    let Some(obj) = state.objects.get(&source_id) else {
+        return false;
+    };
+
+    if obj.card_types.core_types.contains(&CoreType::Land) {
+        let options = land_mana_options_for_priority(
+            state,
+            player,
+            source_id,
+            aura_sources,
+            mana_activation_gates,
+        );
+        let matching_options = options
+            .iter()
+            .filter(|option| option.ability_index == Some(ability_index))
+            .collect::<Vec<_>>();
+        if !matching_options.is_empty() {
+            return matching_options
+                .iter()
+                .any(|option| resolve_mana_option_for_trigger_probe(state, player, option));
+        }
+    }
+
+    let Some(ability_def) = obj.abilities.get(ability_index).cloned() else {
+        return false;
+    };
+    let mut probe = state.clone();
+    let mut events = Vec::new();
+    if mana_abilities::resolve_mana_ability(
+        &mut probe,
+        source_id,
+        player,
+        &ability_def,
+        &mut events,
+        None,
+    )
+    .is_err()
+    {
+        return false;
+    }
+    triggers::events_would_queue_non_mana_trigger(&mut probe, &events)
+}
+
+fn tap_land_action_would_queue_non_mana_trigger(
+    state: &GameState,
+    player: PlayerId,
+    object_id: ObjectId,
+    aura_sources: &[ObjectId],
+    mana_activation_gates: &mana_abilities::ManaActivationGates,
+) -> bool {
+    land_mana_options_for_priority(
+        state,
+        player,
+        object_id,
+        aura_sources,
+        mana_activation_gates,
+    )
+    .iter()
+    .any(|option| {
+        option.penalty.is_meaningful_priority_activation()
+            || resolve_mana_option_for_trigger_probe(state, player, option)
+    })
+}
+
+fn grouped_mana_requires_priority(state: &GameState, player: PlayerId) -> bool {
+    let aura_sources = mana_sources::taps_for_mana_trigger_sources(state);
+    let mana_activation_gates = mana_abilities::ManaActivationGates::compute(state);
+
+    activatable_object_mana_actions_for_player(state, player)
+        .iter()
+        .any(|action| match action {
+            GameAction::TapLandForMana { object_id } => {
+                tap_land_action_would_queue_non_mana_trigger(
+                    state,
+                    player,
+                    *object_id,
+                    &aura_sources,
+                    &mana_activation_gates,
+                )
+            }
+            GameAction::ActivateAbility {
+                source_id,
+                ability_index,
+            } => activate_mana_action_would_queue_non_mana_trigger(
+                state,
+                player,
+                *source_id,
+                *ability_index,
+                &aura_sources,
+                &mana_activation_gates,
+            ),
+            _ => false,
+        })
+}
+
 /// The flat-list half of [`has_meaningful_priority_action`]: any non-pass,
 /// non-standalone-mana priority action in the caller-supplied `actions` list
 /// (or a sacrifice-for-mana injected into the flat list by a test/probe).
@@ -1148,15 +1336,18 @@ pub fn auto_pass_recommended(state: &GameState, actions: &[GameAction]) -> bool 
     // activatable-capacity space (auto-tap AND manual-float payment,
     // game/casting.rs:11375-11461), so it subsumes the old
     // `activatable_object_mana_actions` proxy while dropping the false HOLD.
-    // Meaningful non-mana activated abilities and issue #544 sac-for-mana on an
-    // opponent's turn are still held below by `has_meaningful_priority_action`;
-    // a dedicated `has_feasibly_activatable_ability` opponent-turn seam
-    // (the ability analogue of this predicate) is deferred as future work.
+    // Meaningful non-mana activated abilities, grouped mana that would queue
+    // non-mana triggers, and issue #544 sac-for-mana on an opponent's turn are
+    // still held below by the meaningful-action/sac gates; a dedicated
+    // `has_feasibly_activatable_ability` opponent-turn seam (the ability
+    // analogue of this predicate) is deferred as future work.
     if state.active_player != player {
         let probe: &_ = cast_probe.get_or_insert_with(|| {
             crate::game::casting::PriorityCastProbe::from_flushed_state(state.clone(), player)
         });
-        if has_feasibly_castable_spell(probe.state(), player, Some(probe)) {
+        if has_feasibly_castable_spell(probe.state(), player, Some(probe))
+            || grouped_mana_requires_priority(state, player)
+        {
             return false;
         }
     }
@@ -1198,7 +1389,8 @@ pub fn auto_pass_recommended(state: &GameState, actions: &[GameAction]) -> bool 
         }
     }
 
-    // A genuinely meaningful non-mana priority action always holds. A
+    // A genuinely meaningful non-mana priority action always holds. Grouped
+    // mana holds when activating it would queue a non-mana trigger. A
     // sacrifice-for-mana ability (issue #544) holds ONLY when the sacrifice or
     // its mana enables a concrete downstream follow-up — case (1) a feasibly
     // castable spell is already resolved by the castability rungs above, so
@@ -1207,14 +1399,16 @@ pub fn auto_pass_recommended(state: &GameState, actions: &[GameAction]) -> bool 
     // no downstream use is not a meaningful priority window — let auto-pass fire.
     // Short-circuit order preserves perf: the followup scan runs only when the
     // flat list is not already meaningful AND a sac-for-mana source is present.
-    let holds = flat_actions_have_meaningful_priority(state, actions) || {
-        // Short-circuit: only sweep (or reuse the rung-5 sweep) when the flat
-        // list is not already meaningful AND a sac-for-mana source is present.
-        let sweep =
-            object_mana_actions.get_or_insert_with(|| activatable_object_mana_actions(state));
-        mana_actions_include_meaningful_sacrifice(state, sweep.as_slice())
-            && sacrifice_for_mana_enables_followup(state, player)
-    };
+    let holds = flat_actions_have_meaningful_priority(state, actions)
+        || grouped_mana_requires_priority(state, player)
+        || {
+            // Short-circuit: only sweep (or reuse the rung-5 sweep) when the flat
+            // list is not already meaningful AND a sac-for-mana source is present.
+            let sweep =
+                object_mana_actions.get_or_insert_with(|| activatable_object_mana_actions(state));
+            mana_actions_include_meaningful_sacrifice(state, sweep.as_slice())
+                && sacrifice_for_mana_enables_followup(state, player)
+        };
     if !holds {
         return true;
     }
@@ -1637,7 +1831,7 @@ mod tests {
         AbilityCost, AbilityDefinition, AbilityKind, ChoiceType, ContinuousModification,
         ControllerRef, Effect, FilterProp, ManaContribution, ManaProduction, QuantityExpr,
         ResolvedAbility, SacrificeCost, SearchSelectionConstraint, StaticDefinition, TargetFilter,
-        TargetRef, TriggerDefinition, TypedFilter,
+        TargetRef, TriggerDefinition, TypeFilter, TypedFilter,
     };
     use crate::types::actions::GameAction;
     use crate::types::card_type::CoreType;
@@ -1651,11 +1845,23 @@ mod tests {
     use crate::types::mana::{ManaColor, ManaCost, ManaType, ManaUnit};
     use crate::types::phase::{Phase, PhaseStop, PhaseStopScope};
     use crate::types::player::PlayerId;
+    use crate::types::triggers::TriggerMode;
     use crate::types::zones::Zone;
 
     fn setup_priority() -> GameState {
         let mut state = GameState::new_two_player(42);
         state.active_player = PlayerId(0);
+        state.priority_player = PlayerId(0);
+        state.waiting_for = WaitingFor::Priority {
+            player: PlayerId(0),
+        };
+        state
+    }
+
+    fn setup_opponent_priority(phase: Phase) -> GameState {
+        let mut state = setup_priority();
+        state.phase = phase;
+        state.active_player = PlayerId(1);
         state.priority_player = PlayerId(0);
         state.waiting_for = WaitingFor::Priority {
             player: PlayerId(0),
@@ -1703,6 +1909,51 @@ mod tests {
             .cost(AbilityCost::Tap),
         );
         ability_index
+    }
+
+    fn add_mana_trigger_source(
+        state: &mut GameState,
+        name: &str,
+        mode: TriggerMode,
+        effect: Effect,
+    ) -> ObjectId {
+        let source = create_object(
+            state,
+            CardId(9100),
+            PlayerId(1),
+            name.to_string(),
+            Zone::Battlefield,
+        );
+        {
+            let obj = state.objects.get_mut(&source).unwrap();
+            obj.card_types.core_types.push(CoreType::Enchantment);
+            obj.trigger_definitions.push(
+                TriggerDefinition::new(mode)
+                    .execute(AbilityDefinition::new(AbilityKind::Database, effect))
+                    .valid_card(TargetFilter::Typed(TypedFilter::new(TypeFilter::Land))),
+            );
+        }
+        source
+    }
+
+    fn draw_controller_effect() -> Effect {
+        Effect::Draw {
+            count: QuantityExpr::Fixed { value: 1 },
+            target: TargetFilter::Controller,
+        }
+    }
+
+    fn add_green_mana_effect() -> Effect {
+        Effect::Mana {
+            produced: ManaProduction::Fixed {
+                colors: vec![ManaColor::Green],
+                contribution: ManaContribution::Additional,
+            },
+            restrictions: vec![],
+            grants: vec![],
+            expiry: None,
+            target: None,
+        }
     }
 
     fn bucket_has(
@@ -3046,6 +3297,77 @@ mod tests {
         );
     }
 
+    #[test]
+    fn auto_pass_holds_when_tapping_land_for_mana_would_queue_non_mana_trigger() {
+        let mut state = setup_opponent_priority(Phase::PreCombatMain);
+        let land = create_land(&mut state, "Forest", &[]);
+        add_fixed_mana_ability(&mut state, land, ManaColor::Green);
+        add_mana_trigger_source(
+            &mut state,
+            "Manabarbs-like Trigger",
+            TriggerMode::TapsForMana,
+            draw_controller_effect(),
+        );
+
+        let flat = super::flat_priority_actions(&state);
+        assert!(
+            !super::auto_pass_recommended(&state, &flat),
+            "a non-mana TapsForMana trigger makes tapping the land a meaningful priority action"
+        );
+    }
+
+    #[test]
+    fn auto_pass_skips_pure_triggered_mana_bonus_when_no_mana_is_spendable() {
+        let mut state = setup_opponent_priority(Phase::PreCombatMain);
+        let land = create_land(&mut state, "Forest", &[]);
+        add_fixed_mana_ability(&mut state, land, ManaColor::Green);
+        add_mana_trigger_source(
+            &mut state,
+            "Wild Growth-like Trigger",
+            TriggerMode::TapsForMana,
+            add_green_mana_effect(),
+        );
+
+        let flat = super::flat_priority_actions(&state);
+        assert!(
+            super::auto_pass_recommended(&state, &flat),
+            "pure triggered mana should not stop auto-pass when the mana is unusable"
+        );
+    }
+
+    #[test]
+    fn auto_pass_classifies_mana_added_triggers_by_triggered_mana_rules() {
+        let mut mana_only = setup_opponent_priority(Phase::PreCombatMain);
+        let land = create_land(&mut mana_only, "Forest", &[]);
+        add_fixed_mana_ability(&mut mana_only, land, ManaColor::Green);
+        add_mana_trigger_source(
+            &mut mana_only,
+            "Mana Echo",
+            TriggerMode::ManaAdded,
+            add_green_mana_effect(),
+        );
+        let flat = super::flat_priority_actions(&mana_only);
+        assert!(
+            super::auto_pass_recommended(&mana_only, &flat),
+            "all-mana ManaAdded triggers are triggered mana abilities and should not stop auto-pass"
+        );
+
+        let mut non_mana = setup_opponent_priority(Phase::PreCombatMain);
+        let land = create_land(&mut non_mana, "Forest", &[]);
+        add_fixed_mana_ability(&mut non_mana, land, ManaColor::Green);
+        add_mana_trigger_source(
+            &mut non_mana,
+            "Mana Draw Trigger",
+            TriggerMode::ManaAdded,
+            draw_controller_effect(),
+        );
+        let flat = super::flat_priority_actions(&non_mana);
+        assert!(
+            !super::auto_pass_recommended(&non_mana, &flat),
+            "non-mana ManaAdded triggers should stop auto-pass"
+        );
+    }
+
     /// Issue #4388 / #544 (narrowed): on an opponent's turn a BARE sac-for-mana
     /// ability (Krark-Clan Ironworks) with an empty hand and no downstream
     /// follow-up enables nothing — the frontend auto-pass recommendation fires.
@@ -3728,12 +4050,12 @@ mod tests {
         );
     }
 
-    /// NEGATIVE — Forbidden Orchard token (`Effect::Token` owner Opponent): a
-    /// fully-parsed effect that is not a CR 119/120 life/damage swing, so the
-    /// sign classifier's documented default arm rejects it → auto-pass.
-    /// Reach-guard: the tap ability is activatable (only the sign rejects it).
+    /// Forbidden Orchard token (`Effect::Token` owner Opponent): not a CR
+    /// 119/120 life/damage swing, so G1's beneficial sign classifier rejects it,
+    /// but the grouped-mana probe still holds because tapping for mana queues a
+    /// non-mana token trigger.
     #[test]
-    fn g1_auto_passes_for_forbidden_orchard_token() {
+    fn auto_pass_holds_for_forbidden_orchard_token_via_grouped_mana() {
         use crate::types::ability::PtValue;
         use crate::types::triggers::TriggerMode;
         let mut state = own_main_priority();
@@ -3775,8 +4097,8 @@ mod tests {
             "a token-creation rider is not a CR 119/120 benefit"
         );
         assert!(
-            super::auto_pass_recommended(&state, &flat),
-            "Forbidden-Orchard token rider → auto-pass"
+            !super::auto_pass_recommended(&state, &flat),
+            "Forbidden-Orchard token rider queues a non-mana trigger → hold"
         );
     }
 
@@ -3850,12 +4172,11 @@ mod tests {
         );
     }
 
-    /// NEGATIVE — wrong window (opponent's turn): G1 requires `active_player ==
-    /// player`. On the opponent's turn the beneficial hold does not apply; the
-    /// opponent-turn castability rung (rung 7) governs instead, and with nothing
-    /// castable auto-pass fires. Reach-guard: the same board on P0's turn holds.
+    /// Opponent's turn: G1 requires `active_player == player`, but the broader
+    /// grouped-mana probe still holds because tapping the source for mana queues
+    /// a non-mana tap trigger. Reach-guard: the same board on P0's turn holds.
     #[test]
-    fn g1_auto_passes_on_opponents_turn_wrong_window() {
+    fn auto_pass_holds_for_mana_tap_trigger_on_opponents_turn_via_grouped_mana() {
         let mut state = own_main_priority();
         add_mana_tap_creature(&mut state, PlayerId(0), Some(zhur_taa_trigger()));
         let flat = super::flat_priority_actions(&state);
@@ -3868,8 +4189,8 @@ mod tests {
         // Flip only the turn — it is now the opponent's (P1's) turn.
         state.active_player = PlayerId(1);
         assert!(
-            super::auto_pass_recommended(&state, &flat),
-            "opponent's turn is outside G1's own-turn window → auto-pass"
+            !super::auto_pass_recommended(&state, &flat),
+            "opponent's turn is outside G1, but grouped mana still sees the queued non-mana trigger → hold"
         );
     }
 
