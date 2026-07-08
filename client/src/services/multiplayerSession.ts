@@ -1,11 +1,21 @@
+import type { FormatConfig, MatchType } from "../adapter/types";
+
 export const WS_SESSION_STORAGE_KEY = "phase-ws-session";
 export const WS_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+
+export interface WsHostSessionData {
+  formatConfig: FormatConfig;
+  timerSeconds: number | null;
+  matchType: MatchType;
+}
 
 export interface WsSessionData {
   gameCode: string;
   playerToken: string;
   serverUrl: string;
   timestamp: number;
+  hostSession?: WsHostSessionData;
+  hostIsPublic?: boolean;
 }
 
 export function isWsSessionValid(session: WsSessionData): boolean {
