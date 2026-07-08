@@ -23,10 +23,10 @@ export function isWsSessionValid(session: WsSessionData): boolean {
 }
 
 export function loadWsSession(): WsSessionData | null {
-  const raw = localStorage.getItem(WS_SESSION_STORAGE_KEY);
-  if (!raw) return null;
-
   try {
+    const raw = localStorage.getItem(WS_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+
     const session = JSON.parse(raw) as WsSessionData;
     if (!isWsSessionValid(session)) {
       clearWsSession();
@@ -40,9 +40,17 @@ export function loadWsSession(): WsSessionData | null {
 }
 
 export function saveWsSession(session: WsSessionData): void {
-  localStorage.setItem(WS_SESSION_STORAGE_KEY, JSON.stringify(session));
+  try {
+    localStorage.setItem(WS_SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // A blocked/quota-limited store disables reconnect persistence, not hosting.
+  }
 }
 
 export function clearWsSession(): void {
-  localStorage.removeItem(WS_SESSION_STORAGE_KEY);
+  try {
+    localStorage.removeItem(WS_SESSION_STORAGE_KEY);
+  } catch {
+    // Nothing else can be done if the browser refuses storage access.
+  }
 }
