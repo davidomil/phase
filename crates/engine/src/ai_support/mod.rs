@@ -1252,6 +1252,7 @@ pub fn auto_pass_recommended(state: &GameState, actions: &[GameAction]) -> bool 
     //    avoiding the PR #5229 double-evaluation.
     let mut cast_probe: Option<crate::game::casting::PriorityCastProbe> = None;
     let mut object_mana_actions: Option<Vec<GameAction>> = None;
+    let mut grouped_mana_priority: Option<bool> = None;
 
     // A phase stop on the current phase (empty stack = initial priority window)
     // means the player asked to pause here — never recommend auto-pass. Moved
@@ -1345,8 +1346,10 @@ pub fn auto_pass_recommended(state: &GameState, actions: &[GameAction]) -> bool 
         let probe: &_ = cast_probe.get_or_insert_with(|| {
             crate::game::casting::PriorityCastProbe::from_flushed_state(state.clone(), player)
         });
+        let grouped_requires_priority = *grouped_mana_priority
+            .get_or_insert_with(|| grouped_mana_requires_priority(state, player));
         if has_feasibly_castable_spell(probe.state(), player, Some(probe))
-            || grouped_mana_requires_priority(state, player)
+            || grouped_requires_priority
         {
             return false;
         }
@@ -1400,7 +1403,8 @@ pub fn auto_pass_recommended(state: &GameState, actions: &[GameAction]) -> bool 
     // Short-circuit order preserves perf: the followup scan runs only when the
     // flat list is not already meaningful AND a sac-for-mana source is present.
     let holds = flat_actions_have_meaningful_priority(state, actions)
-        || grouped_mana_requires_priority(state, player)
+        || *grouped_mana_priority
+            .get_or_insert_with(|| grouped_mana_requires_priority(state, player))
         || {
             // Short-circuit: only sweep (or reuse the rung-5 sweep) when the flat
             // list is not already meaningful AND a sac-for-mana source is present.
