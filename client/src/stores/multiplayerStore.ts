@@ -26,7 +26,6 @@ import {
   type LookupJoinTargetResult,
   type RegisterHostRequest,
   type ResolveResult,
-  type ResolveGuestOptions,
 } from "../services/brokerClient";
 import {
   HandshakeError,
@@ -353,11 +352,7 @@ interface MultiplayerActions {
    * alive. Does NOT navigate — the caller inspects the result and handles
    * password retry, build mismatch, etc. before navigation.
    */
-  resolveGuest: (
-    code: string,
-    password?: string,
-    opts?: Pick<ResolveGuestOptions, "reservationToken">,
-  ) => Promise<ResolveResult>;
+  resolveGuest: (code: string, password?: string) => Promise<ResolveResult>;
   /**
    * Read-only typed-code lookup. Returns format/routing metadata without
    * consuming a seat.
@@ -1302,7 +1297,7 @@ export const useMultiplayerStore = create<MultiplayerState & MultiplayerActions>
         subscriptionReconnect = null;
       },
 
-      resolveGuest: async (code, password, opts) => {
+      resolveGuest: async (code, password) => {
         const socket = await get().ensureSubscriptionSocket();
         if (!socket) {
           return {
@@ -1319,7 +1314,6 @@ export const useMultiplayerStore = create<MultiplayerState & MultiplayerActions>
         try {
           return await resolveGuestOver(socket, code, password, {
             signal: ac.signal,
-            reservationToken: opts?.reservationToken,
             // The broker rejects a blank display_name on the resolve frame
             // (required-label rule) and the worker shell drops it without a
             // reply — the guest then times out at deck-select. Always carry
