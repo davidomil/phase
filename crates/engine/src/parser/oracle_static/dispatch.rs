@@ -3202,7 +3202,37 @@ pub(crate) fn parse_static_line_inner(
     if nom_primitives::scan_contains(tp.lower, "triggers an additional time")
         || nom_primitives::scan_contains(tp.lower, "trigger an additional time")
     {
-        let cause = if nom_primitives::scan_contains(tp.lower, "being dealt damage causes")
+        let cause = if let Some((_, spell_qualifier, _)) =
+            nom_primitives::scan_preceded(tp.lower, |i| {
+                // CR 601.2 + CR 707.10: "you casting or copying <types> spell
+                // causes" — Veyran, Voice of Duality class. The qualifier
+                // between the verb pair and " spell causes" names the spell
+                // types ("an instant or sorcery").
+                preceded(
+                    tag::<_, _, OracleError<'_>>("you casting or copying "),
+                    take_until(" spell causes"),
+                )
+                .parse(i)
+            }) {
+            let mut core_types: Vec<CoreType> = Vec::new();
+            if nom_primitives::scan_contains(spell_qualifier, "instant") {
+                core_types.push(CoreType::Instant);
+            }
+            if nom_primitives::scan_contains(spell_qualifier, "sorcery") {
+                core_types.push(CoreType::Sorcery);
+            }
+            if nom_primitives::scan_contains(spell_qualifier, "artifact") {
+                core_types.push(CoreType::Artifact);
+            }
+            if nom_primitives::scan_contains(spell_qualifier, "creature") {
+                core_types.push(CoreType::Creature);
+            }
+            if nom_primitives::scan_contains(spell_qualifier, "enchantment") {
+                core_types.push(CoreType::Enchantment);
+            }
+            // An unqualified "a spell" leaves core_types empty = any spell.
+            TriggerCause::ControllerCastOrCopiedSpell { core_types }
+        } else if nom_primitives::scan_contains(tp.lower, "being dealt damage causes")
             || nom_primitives::scan_contains(tp.lower, "dealt damage causes")
         {
             TriggerCause::ControlledCreatureDealtDamage
