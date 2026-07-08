@@ -1346,10 +1346,11 @@ pub fn auto_pass_recommended(state: &GameState, actions: &[GameAction]) -> bool 
         let probe: &_ = cast_probe.get_or_insert_with(|| {
             crate::game::casting::PriorityCastProbe::from_flushed_state(state.clone(), player)
         });
-        let grouped_requires_priority = *grouped_mana_priority
-            .get_or_insert_with(|| grouped_mana_requires_priority(state, player));
-        if has_feasibly_castable_spell(probe.state(), player, Some(probe))
-            || grouped_requires_priority
+        if has_feasibly_castable_spell(probe.state(), player, Some(probe)) {
+            return false;
+        }
+        if *grouped_mana_priority
+            .get_or_insert_with(|| grouped_mana_requires_priority(state, player))
         {
             return false;
         }
